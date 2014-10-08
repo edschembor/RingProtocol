@@ -4,16 +4,30 @@
  * mcast program
  */
 
+#include <arpa/inet.h>
+#include <string.h>
 #include "net_include.h"
 #include "token.h"
 #include "packet.h"
+#include "ip_packet.h"
+
+void recv_dbg_init(int percent, int machine_index);
 
 int main(int argc, char **argv)
 {
     struct sockaddr_in name;
     struct sockaddr_in send_addr;
+	struct sockaddr_in my_addr; /*Address for this machine*/
+	struct sockaddr_in neighbor; /*Address for the machine after*/
 
+    struct hostent     h_ent;
+	struct hostent     *p_h_ent;
+	
+	int                my_ip;
     int                mcast_addr;
+	int                neighbor_is_set = 0;
+
+    char               machine_name[NAME_LENGTH] = {'\0'};
 
     struct ip_mreq     mreq;
     unsigned char      ttl_val;
@@ -31,6 +45,8 @@ int main(int argc, char **argv)
 	int                num_machines;
 	int                loss_rate;
 	token              *tkn;
+	ip_packet          *i_packet;
+	ip_packet          *received_i_packet;
 
     /*Make sure the usage is correct*/
 	if(argc != 5) {
@@ -49,6 +65,7 @@ int main(int argc, char **argv)
 
     /*Malloc all needed memory*/
 	received_packet = malloc(sizeof(packet));
+	i_packet = malloc(sizeof(ip_packet));
 	tkn = malloc(sizeof(token));
 
 	/*Creates the mcast address*/
@@ -59,6 +76,21 @@ int main(int argc, char **argv)
         perror("Mcast: socket");
         exit(1);
     }
+
+	/*Set my_address struct to send to other processes*/
+    gethostname(machine_name, NAME_LENGTH);
+	p_h_ent = gethostbyname(machine_name);
+	if(p_h_ent == NULL) {
+        printf("mcast: gethostbyname error.\n");
+		exit(1);
+	}
+	memcpy( &h_ent, p_h_ent, sizeof(h_ent));
+	memcpy( &my_ip, h_ent.h_addr_list[0], sizeof(my_ip));
+
+    my_addr.sin_family = AF_INET;
+    my_addr.sin_addr.s_addr = htonl(my_ip);
+    my_addr.sin_port = htons(PORT);
+
 
     /*Used to set up receiving socket*/
     name.sin_family = AF_INET;
@@ -109,29 +141,35 @@ int main(int argc, char **argv)
     /*Wait for the special start packet from start_mcast*/
 	for(;;)
 	{
-	    num = select( FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, NULL);
-	        bytes = recv( sr, (char *) received_packet, SIZE, 0 );
-		    if(received_packet->process_index == -1) {
-			    printf("\nGOT IT\n");
-                break;
-		    }
+	    num = select( FD_SETSIZE, &temp_mask, &dummy_mask,&dummy_mask, NULL);
+	    bytes = recv( sr, (char *) received_packet, SIZE, 0 );
+		if(received_packet->machine_index == -1) {
+            break;
+		}
 	}
 
     /*Connect this process to the next process*/
-    
+    i_packet->machine_index = machine_index;
+	i_packet->my_addr = my_addr; /*WRONG*/
+	while( !neighbor_is_set ) {
+	    sendto(ss, i_packet, sizeof(ip_packet), 0,
+	        (struct sockaddr *)&send_addr, sizeof(send_addr));
+        num = select( FD_SETSIZE, &temp_mask, &dummy_mask,&dummy_mask, NULL);
+		bytes = recv( sr, (char *) received_i_packet, sizeof(ip_packet), 0 );
+
+	}
 
 	/*The first process creates the initial token*/
     if(machine_index == 1) {
         for(i = 0; i < RETRANS_SIZE; i++) {
-            retransmission_request[i] = -1; /*??*/
+            tkn->retransmission_request[i] = -1; /*??*/
 		}
-		for(i = 0; i < is_finished; i++) {
-            is_finished[i] = 0;
-		}
-		sequence = 0;
-		aru = 0;
+		/*for(i = 0; i < tkn->is_finished; i++) {
+            tkn->is_finished[i] = 0;
+		}*/
+		tkn->sequence = 0;
+		tkn->aru = 0;
 	}
-
 
     for(;;)
     {

@@ -41,6 +41,7 @@ int main()
 	printf("\nIndex: %d\n", start_packet->machine_index);
     sendto( ss, (char *) start_packet, SIZE, 0, (struct sockaddr *)&send_addr, sizeof(send_addr) );
 
+
     return 0;
 
 }

@@ -25,8 +25,9 @@ int main(int argc, char **argv)
 	
 	int                my_ip;
     int                mcast_addr;
-	int                neighbor_is_set = 0;
 
+    int                token_received = 0;
+ 
     char               machine_name[NAME_LENGTH] = {'\0'};
 
     struct ip_mreq     mreq;
@@ -39,14 +40,17 @@ int main(int argc, char **argv)
     int                num;
     char               mess_buf[MAX_MESS_LEN];
     char               input_buf[80];
+    struct timeval     timeout;
+
 	packet             *received_packet;
 	int                num_packets;
 	int                machine_index;
 	int                num_machines;
 	int                loss_rate;
+    token              *tkn_ack;
 	token              *tkn;
 	ip_packet          *i_packet;
-	ip_packet          *received_i_packet;
+    packet             *buffer;
 
     /*Make sure the usage is correct*/
 	if(argc != 5) {
@@ -67,6 +71,7 @@ int main(int argc, char **argv)
 	received_packet = malloc(sizeof(packet));
 	i_packet = malloc(sizeof(ip_packet));
 	tkn = malloc(sizeof(token));
+    tkn_ack = malloc(sizeof(token));
 
 	/*Creates the mcast address*/
     mcast_addr = 225 << 24 | 1 << 16 | 2 << 8 | 103; /* (225.1.2.103) */
@@ -141,22 +146,13 @@ int main(int argc, char **argv)
     /*Wait for the special start packet from start_mcast*/
 	for(;;)
 	{
+        temp_mask = mask;
 	    num = select( FD_SETSIZE, &temp_mask, &dummy_mask,&dummy_mask, NULL);
 	    bytes = recv( sr, (char *) received_packet, SIZE, 0 );
 		if(received_packet->machine_index == -1) {
+            printf("\n%d\n", received_packet->machine_index);
             break;
 		}
-	}
-
-    /*Connect this process to the next process*/
-    i_packet->machine_index = machine_index;
-	i_packet->my_addr = my_addr; /*WRONG*/
-	while( !neighbor_is_set ) {
-	    sendto(ss, i_packet, sizeof(ip_packet), 0,
-	        (struct sockaddr *)&send_addr, sizeof(send_addr));
-        num = select( FD_SETSIZE, &temp_mask, &dummy_mask,&dummy_mask, NULL);
-		bytes = recv( sr, (char *) received_i_packet, sizeof(ip_packet), 0 );
-
 	}
 
 	/*The first process creates the initial token*/
@@ -169,7 +165,59 @@ int main(int argc, char **argv)
 		}*/
 		tkn->sequence = 0;
 		tkn->aru = 0;
+        tkn->from_addr = name;
+        token_received = 1;
 	}
+
+    /*Connect this process to the next process*/
+    i_packet->machine_index = machine_index;
+	i_packet->my_addr = my_addr; /*WRONG*/
+
+    /*Wait for neighbor*/
+	for(;;) {
+	    sendto(ss, i_packet, sizeof(ip_packet), 0,
+	        (struct sockaddr *)&send_addr, sizeof(send_addr));
+        num = select( FD_SETSIZE, &temp_mask, &dummy_mask,&dummy_mask, NULL);
+		bytes = recv( sr, (char *) i_packet_buffer, sizeof(ip_packet), 0 );
+        if (bytes > 0) {
+            neighbor = i_packet_buffer->my_addr;
+            break;
+        } else { /*else token ack was lost*/
+            tkn_ack->aru = -1;
+            sendto(ss, tkn_ack, sizeof(token), 0,
+	            (struct sockaddr *)&tkn->from_addr, sizeof(tkn->from_addr));           
+        }
+	}
+
+    /*Wait for token*/
+	for(;;) {
+        if (token_received) {
+            sendto(ss, tkn, sizeof(token), 0,
+	            (struct sockaddr *)&tkn->from_addr, sizeof(tkn->from_addr));           
+
+            timeout.tv_usec = 50000;
+            num = select( FD_SETSIZE, &temp_mask, &dummy_mask,&dummy_mask, &timeout);
+
+            if (num > 0) { /*Check for timeout*/
+                bytes = recv( sr, (char *) tkn_buffer, sizeof(ip_packet), 0 );
+                if (bytes > 0) { /*Check received is tkn*/
+                    if (tkn_buffer->aru < 0) /*Check received is tkn_ack*/
+                        break;
+                }
+            }
+
+        } else {
+            num = select( FD_SETSIZE, &temp_mask, &dummy_mask,&dummy_mask, NULL);
+            bytes = recv( sr, (char *) tkn, sizeof(ip_packet), 0 );
+            if (bytes > 0) {
+                token_received = 1;
+                tkn_ack->aru = -1;
+                sendto(ss, tkn_ack, sizeof(token), 0,
+                    (struct sockaddr *)&tkn->from_addr, sizeof(tkn->from_addr));
+            }
+        }
+	}
+
 
     for(;;)
     {

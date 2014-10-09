@@ -3,9 +3,11 @@
 
 typedef struct token_struct {
 	
-	int retransmission_request[RETRANS_SIZE];
-	int is_finished[PROCESS_COUNT];
+    int type;
 	int sequence;
 	int aru;
+	struct sockaddr_in from_addr;
+	int retransmission_request[RETRANS_SIZE];
+	int is_finished[PROCESS_COUNT];
 
 } token;

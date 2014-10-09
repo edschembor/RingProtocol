@@ -3,9 +3,10 @@
 
 typedef struct packet_struct{
 
-	char data[PAYLOAD];
+    int type;
 	int machine_index;
 	int packet_index;
 	int random_number;
+	char data[PAYLOAD];
 
 } packet;

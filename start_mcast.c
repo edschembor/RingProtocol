@@ -39,7 +39,7 @@ int main()
 	start_packet = malloc(sizeof(packet));
 	start_packet->machine_index = -1;
 	printf("\nIndex: %d\n", start_packet->machine_index);
-    sendto( ss, (char *) start_packet, SIZE, 0, (struct sockaddr *)&send_addr, sizeof(send_addr) );
+    sendto( ss, (char *) start_packet, PACKET_SIZE, 0, (struct sockaddr *)&send_addr, sizeof(send_addr) );
 
 
     return 0;

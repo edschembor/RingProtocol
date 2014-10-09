@@ -10,47 +10,56 @@
 #include "token.h"
 #include "packet.h"
 #include "ip_packet.h"
+#include "recv_dbg.h"
+#include <errno.h>
 
 void recv_dbg_init(int percent, int machine_index);
 
+void send_token();
+
+struct sockaddr_in name;
+struct sockaddr_in send_addr;
+struct sockaddr_in my_addr; /*Address for this machine*/
+struct sockaddr_in neighbor; /*Address for the machine after*/
+
+struct hostent     h_ent;
+struct hostent     *p_h_ent;
+
+int                my_ip;
+int                mcast_addr;
+
+int                seen_token = 0;
+int                has_token = 0;
+int                has_neighbor = 0;
+int                sent_token = 0;
+int                packet_type;
+
+char               machine_name[NAME_LENGTH] = {'\0'};
+
+struct ip_mreq     mreq;
+unsigned char      ttl_val;
+
+int                ss,sr,i;
+fd_set             mask;
+fd_set             dummy_mask,temp_mask;
+int                bytes;
+int                num;
+char               mess_buf[MAX_MESS_LEN];
+char               input_buf[80];
+struct timeval     timeout;
+
+packet             *received_packet;
+int                num_packets;
+int                machine_index;
+int                num_machines;
+int                loss_rate;
+token              *tkn_ack;
+token              *tkn;
+ip_packet          *i_packet;
+packet             *buffer;
+
 int main(int argc, char **argv)
 {
-    struct sockaddr_in name;
-    struct sockaddr_in send_addr;
-	struct sockaddr_in my_addr; /*Address for this machine*/
-	struct sockaddr_in neighbor; /*Address for the machine after*/
-
-    struct hostent     h_ent;
-	struct hostent     *p_h_ent;
-	
-	int                my_ip;
-    int                mcast_addr;
-
-    int                token_received = 0;
- 
-    char               machine_name[NAME_LENGTH] = {'\0'};
-
-    struct ip_mreq     mreq;
-    unsigned char      ttl_val;
-
-    int                ss,sr,i;
-    fd_set             mask;
-    fd_set             dummy_mask,temp_mask;
-    int                bytes;
-    int                num;
-    char               mess_buf[MAX_MESS_LEN];
-    char               input_buf[80];
-    struct timeval     timeout;
-
-	packet             *received_packet;
-	int                num_packets;
-	int                machine_index;
-	int                num_machines;
-	int                loss_rate;
-    token              *tkn_ack;
-	token              *tkn;
-	ip_packet          *i_packet;
-    packet             *buffer;
 
     /*Make sure the usage is correct*/
 	if(argc != 5) {
@@ -72,6 +81,7 @@ int main(int argc, char **argv)
 	i_packet = malloc(sizeof(ip_packet));
 	tkn = malloc(sizeof(token));
     tkn_ack = malloc(sizeof(token));
+    buffer = malloc(PACKET_SIZE);
 
 	/*Creates the mcast address*/
     mcast_addr = 225 << 24 | 1 << 16 | 2 << 8 | 103; /* (225.1.2.103) */
@@ -93,7 +103,7 @@ int main(int argc, char **argv)
 	memcpy( &my_ip, h_ent.h_addr_list[0], sizeof(my_ip));
 
     my_addr.sin_family = AF_INET;
-    my_addr.sin_addr.s_addr = htonl(my_ip);
+    my_addr.sin_addr.s_addr = my_ip;
     my_addr.sin_port = htons(PORT);
 
 
@@ -148,7 +158,7 @@ int main(int argc, char **argv)
 	{
         temp_mask = mask;
 	    num = select( FD_SETSIZE, &temp_mask, &dummy_mask,&dummy_mask, NULL);
-	    bytes = recv( sr, (char *) received_packet, SIZE, 0 );
+	    bytes = recv( sr, (char *) received_packet, PACKET_SIZE, 0 );
 		if(received_packet->machine_index == -1) {
             printf("\n%d\n", received_packet->machine_index);
             break;
@@ -163,61 +173,67 @@ int main(int argc, char **argv)
 		/*for(i = 0; i < tkn->is_finished; i++) {
             tkn->is_finished[i] = 0;
 		}*/
+        tkn->type = 1;
 		tkn->sequence = 0;
 		tkn->aru = 0;
         tkn->from_addr = name;
-        token_received = 1;
+        has_token = 1;
 	}
 
     /*Connect this process to the next process*/
     i_packet->machine_index = machine_index;
-	i_packet->my_addr = my_addr; /*WRONG*/
+	i_packet->addr = my_addr;
+    i_packet->type = 2;
 
-    /*Wait for neighbor*/
-	for(;;) {
-	    sendto(ss, i_packet, sizeof(ip_packet), 0,
-	        (struct sockaddr *)&send_addr, sizeof(send_addr));
-        num = select( FD_SETSIZE, &temp_mask, &dummy_mask,&dummy_mask, NULL);
-		bytes = recv( sr, (char *) i_packet_buffer, sizeof(ip_packet), 0 );
-        if (bytes > 0) {
-            neighbor = i_packet_buffer->my_addr;
+    printf("\nMy adress is: %s\n", inet_ntoa(my_addr.sin_addr));
+
+    printf("\nI'm machine number: %d\n", machine_index);
+    for(;;)
+    {
+        temp_mask = mask;
+
+        /*If I've seen the token and I've sent it successfully, I end*/
+        if (seen_token && sent_token) {
             break;
-        } else { /*else token ack was lost*/
-            tkn_ack->aru = -1;
-            sendto(ss, tkn_ack, sizeof(token), 0,
-	            (struct sockaddr *)&tkn->from_addr, sizeof(tkn->from_addr));           
         }
-	}
 
-    /*Wait for token*/
-	for(;;) {
-        if (token_received) {
-            sendto(ss, tkn, sizeof(token), 0,
-	            (struct sockaddr *)&tkn->from_addr, sizeof(tkn->from_addr));           
+        /*If I haven't seen the token, multicast*/
+        if(seen_token == 0) {
+            sendto( ss, i_packet, sizeof(ip_packet), 0, 
+                (struct sockaddr *)&send_addr, sizeof(send_addr) );
+        }
 
-            timeout.tv_usec = 50000;
-            num = select( FD_SETSIZE, &temp_mask, &dummy_mask,&dummy_mask, &timeout);
+        num = select( FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, NULL);
 
-            if (num > 0) { /*Check for timeout*/
-                bytes = recv( sr, (char *) tkn_buffer, sizeof(ip_packet), 0 );
-                if (bytes > 0) { /*Check received is tkn*/
-                    if (tkn_buffer->aru < 0) /*Check received is tkn_ack*/
-                        break;
+        if (num > 0) {
+            bytes = recv_dbg( sr, (char *) buffer, PACKET_SIZE, 0 );
+            packet_type = buffer->type;
+    /*        printf("\nBuffer Type: %d\n", buffer->type);
+            printf("\nIndex: %d\n", ((ip_packet *)buffer)->machine_index);*/
+            if (packet_type == 1) {
+                printf("\nI got a token and it's %d big!\n", bytes);
+                has_token = 1;
+                seen_token = 1;
+                tkn_ack->aru = -1;
+                sendto( ss, tkn_ack, sizeof(token), 0, 
+                    (struct sockaddr *)&(((token *)buffer)->from_addr), sizeof(((token *)buffer)->from_addr) );
+               
+            } else if (packet_type == 2) {
+                if (((ip_packet *) buffer)->machine_index == ((machine_index % num_machines) + 1)) {
+                printf("\nI got a ip_packet and it's %d big!\n", bytes);
+                    neighbor = ((ip_packet *) buffer) -> addr;
+                    has_neighbor = 1;
+                    printf("\nI found my neighbor!\n");
                 }
             }
-
-        } else {
-            num = select( FD_SETSIZE, &temp_mask, &dummy_mask,&dummy_mask, NULL);
-            bytes = recv( sr, (char *) tkn, sizeof(ip_packet), 0 );
-            if (bytes > 0) {
-                token_received = 1;
-                tkn_ack->aru = -1;
-                sendto(ss, tkn_ack, sizeof(token), 0,
-                    (struct sockaddr *)&tkn->from_addr, sizeof(tkn->from_addr));
-            }
         }
-	}
+        if (has_token && has_neighbor) {
+            printf("\nI'm about to send a token!\n");
+            send_token();
+        }
+    }
 
+    printf("\nI BROKE OUT\n");
 
     for(;;)
     {
@@ -242,3 +258,21 @@ int main(int argc, char **argv)
 
 }
 
+void send_token() {
+    for (;;) {
+        sendto( ss, buffer, sizeof(token), 0, 
+            (struct sockaddr *)&neighbor, sizeof(neighbor) );
+       /* printf("%s\n", inet_ntoa(neighbor.sin_addr));
+        */
+        temp_mask = mask;
+        timeout.tv_usec = 50000;
+        num = select( FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, &timeout);
+        if (num > 0) {
+            bytes = recv_dbg( sr,(char *) buffer, PACKET_SIZE, 0 );
+            if ((buffer->type == 1) && (((token *)buffer)->aru == -1)) {
+                has_token = 0;
+                sent_token = 1;
+            }
+        }
+    }
+}

@@ -2,11 +2,25 @@
  * TODO: Remove isFinished from token.h
  *       Come up with ending logic
  *       Last lowered?
+ *       Holding array
  */
 
 for(;;) {
 
 	if(has_token) {
+	
+		/*If receive token, send ack*/
+		/*Set timeout?*/
+		num = select( FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, &timeout);
+        if (num > 0) {
+            bytes = recv_dbg( sr, (char *) buffer, PACKET_SIZE, 0 );
+            packet_type = buffer->type;
+
+            if (packet_type == 1) {
+            	sendto( ss, tkn_ack, sizeof(token), 0,  (struct sockaddr *)&(((token *)buffer)->from_addr), 
+            		sizeof(((token *)buffer)->from_addr) );
+            }
+        }
 	
 		/*Logic for updating the token*/
 		if((token->aru > local_aru) || (/*You were last one to lower*/)) {
@@ -16,8 +30,8 @@ for(;;) {
 		/*If you have any packets in the retrans in your packet holding
 		 * array, send them*/
 		for(i = 0; i < RETRANS_SIZE; i++) {
-			if(frame[i%FRAME_SIZE]->packet_index == token->retransmission_request[i]) {
-				sendto( ss, frame[i%FRAME_SIZE], sizeof(packet), 0, (struct sockaddr *)&send_addr, 
+			if(holding[i%HOLDING_SIZE]->packet_index == token->retransmission_request[i]) {
+				sendto( ss, holding[i%HOLDING_SIZE], sizeof(packet), 0, (struct sockaddr *)&send_addr, 
 					sizeof(send_addr) );
 			}
 		}
@@ -30,33 +44,39 @@ for(;;) {
 			}
 		}
 
-		/*If sent_packets < num_packets*/
-
+		if(sent_packets < num_packets) {
+			
 			/*Update your frame so that it is filled and has no packets with
 		 	* an index less than min(token.aru, previous token.aru) */
-
-		/*else*/
-
-			/*if local ARU = token.sq = token.aru*/
-
+		}else{
+			
+			if(local_ARU == token.sq == token.aru) {
 				/*FINISHING LOGIC*/
+			}
+			
+		}
 
-		/*Multicast all packets in your frame*/
-		/*for all packets in frame: */
+		/*Multicast all packets in your frame and update token*/
+		for(i = 0; i < FRAME_SIZE; i++) {
+		
 			/*Multicast packet*/
+			sendto( ss, frame[i], sizeof(packet), 0, (struct sockaddr *)&send_addr, sizeof(send_addr) );
+			
+			/*Update token*/
 			if((token->aru == token->sequence) && (local_aru == token->aru) ) {
 				token->aru++;
 			}
 			if(packet->index > token->sequence) {
 				token_sequence = packet->index;
-			}
-		
-		/*Update token's seq*/
+			}	
+		}
 
 		/*Set last_seen_ARU to the token's aru*/
 
 		/*Send the token to your neighbor*/
+		
 		/*Wait for ack*/
+		
 		/*has_token = 0*/
 
 	}else{

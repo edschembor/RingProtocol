@@ -211,7 +211,6 @@ int main(int argc, char **argv)
         temp_mask = mask;
 
         /*If I've seen the token and I've sent it successfully, I end*/
-        printf("\n%d %d\n", seen_token, sent_token);
         if (seen_token && sent_token) {
             break;
         }
@@ -233,30 +232,32 @@ int main(int argc, char **argv)
             if (packet_type == 1) {
                 printf("\nI got a token and it's %d big!\n", bytes);
 
-                /** Set booleans, you've seen and have the token **/
-                has_token = 1;
-                seen_token = 1;
+                /** Check that it's not a rogue ack **/
+                if (((token *)buffer)->aru != -1) {
+                    /** Set booleans, you've seen and have the token **/
+                    has_token = 1;
+                    seen_token = 1;
 
-                /** set the token ack and send it **/
-                tkn_ack->type = 1;
-                tkn_ack->aru = -1;
-                tkn_ack->from_addr = my_addr; /** for testing, not necessary **/
+                    /** set the token ack and send it **/
+                    tkn_ack->type = 1;
+                    tkn_ack->aru = -1;
+                    tkn_ack->from_addr = my_addr; /** for testing, not necessary **/
 
-                printf("received token from: %s", inet_ntoa(((token *)buffer)->from_addr.sin_addr));
- 
-                sendto( ss, tkn_ack, sizeof(token), 0, 
-                    (struct sockaddr *)&(((token *)buffer)->from_addr), sizeof(((token *)buffer)->from_addr) );
+                    printf("received token from: %s\this aru is: %d\n", inet_ntoa(((token *)buffer)->from_addr.sin_addr), ((token*)buffer)->aru);
+     
+                    sendto( ss, tkn_ack, sizeof(token), 0, 
+                        (struct sockaddr *)&(((token *)buffer)->from_addr), sizeof(((token *)buffer)->from_addr) );
+                    printf("\nI sent an ack, here's the proof: %d %d", tkn_ack->aru, tkn_ack->type);
 
-                /** shitty hack. delete **/
-                if (machine_index == 1) {
-                    printf("\nI'm 1 and I got the token, acking it and ending\n");
-                    break;
-                }
+                    /** shitty hack. delete **/
+                    if (machine_index == 1) {
+                        break;
+                    }
 
-                /** set token for sending to neighbor **/
-                tkn = (token *) buffer;
-                tkn->from_addr = my_addr;
-               
+                    /** set token for sending to neighbor **/
+                    tkn = (token *) buffer;
+                    tkn->from_addr = my_addr;
+               }
             /** If ip_packet **/
             } else if (packet_type == 2) {
                 /** Check that the ip_packet's index is your neighbor**/
@@ -264,7 +265,7 @@ int main(int argc, char **argv)
                     /** Set the ip_packet's address to your neighbor**/
                     neighbor = ((ip_packet *) buffer) -> addr;
                     has_neighbor = 1;
-                    printf("\nI found my neighbor!\n");
+                    printf("\nI found my neighbor! His address is: %s\n", inet_ntoa(((ip_packet*) buffer)-> addr.sin_addr));
                 }
             }
         }
@@ -284,26 +285,16 @@ int main(int argc, char **argv)
  * SINGLE RING TOKEN BEGINS HERE
  * ************************    
  * ***********************/
-/*
+
     for(;;)
     {
         temp_mask = mask;
         num = select( FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, NULL);
         if (num > 0) {
-            if ( FD_ISSET( sr, &temp_mask) ) {
-                bytes = recv( sr, mess_buf, sizeof(mess_buf), 0 );
-                mess_buf[bytes] = 0;
-                printf( "received : %s\n", mess_buf );
-            }else if( FD_ISSET(0, &temp_mask) ) {
-                bytes = read( 0, input_buf, sizeof(input_buf) );
-                input_buf[bytes] = 0;
-                printf( "there is an input: %s\n", input_buf );
-                sendto( ss, input_buf, strlen(input_buf), 0, 
-                    (struct sockaddr *)&send_addr, sizeof(send_addr) );
-            }
+            bytes = recv( sr, mess_buf, sizeof(mess_buf), 0 );
         }
     }
-*/
+
     return 0;
 
 }
@@ -325,11 +316,18 @@ void send_token() {
         if (num > 0) {
             bytes = recv_dbg( sr,(char *) buffer, PACKET_SIZE, 0 );
             /** if received is an ack, break **/
-            if ((buffer->type == 1) && (((token *)buffer)->aru == -1)) {
-                printf("\nI got the ack! It's from %s\n", inet_ntoa(((token *)buffer)->from_addr.sin_addr));
-                has_token = 0;
-                sent_token = 1;
-                break;
+            if ((buffer->type == 1)) {
+                if (((token *)buffer)->aru == -1) {
+                    printf("\nI got the ack! It's from %s\n", inet_ntoa(((token *)buffer)->from_addr.sin_addr));
+                    has_token = 0;
+                    sent_token = 1;
+                    break;
+                } else if (((token *)buffer)->aru == 0) {
+                    sendto( ss, tkn_ack, sizeof(token), 0, 
+                        (struct sockaddr *)&(((token *)buffer)->from_addr), sizeof(((token *)buffer)->from_addr) );
+                        printf("\nI sent an ack, here's the proof: %d %d", tkn_ack->aru, tkn_ack->type);
+
+                }
             }
         }
     }

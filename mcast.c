@@ -54,7 +54,7 @@ int                machine_index;
 int                num_machines;
 int                loss_rate;
 token              *tkn_ack;
-token              *tkn;
+token              tkn;
 ip_packet          *i_packet;
 packet             *buffer;
 
@@ -79,7 +79,6 @@ int main(int argc, char **argv)
     /*Malloc all needed memory*/
 	received_packet = malloc(sizeof(packet));
 	i_packet = malloc(sizeof(ip_packet));
-	tkn = malloc(sizeof(token));
     tkn_ack = malloc(sizeof(token));
     buffer = malloc(PACKET_SIZE);
 
@@ -179,15 +178,15 @@ int main(int argc, char **argv)
 	/*The first process creates the initial token*/
     if(machine_index == 1) {
         for(i = 0; i < RETRANS_SIZE; i++) {
-            tkn->retransmission_request[i] = -1; /*??*/
+            tkn.retransmission_request[i] = -1; /*??*/
 		}
 		/*for(i = 0; i < tkn->is_finished; i++) {
             tkn->is_finished[i] = 0;
 		}*/
-        tkn->type = 1;
-		tkn->sequence = 0;
-		tkn->aru = 0;
-        tkn->from_addr = my_addr;
+        tkn.type = 1;
+		tkn.sequence = 0;
+		tkn.aru = 0;
+        tkn.from_addr = my_addr;
         has_token = 1;
 	}
 
@@ -211,7 +210,8 @@ int main(int argc, char **argv)
         temp_mask = mask;
 
         /*If I've seen the token and I've sent it successfully, I end*/
-        if (seen_token && sent_token) {
+        /*if (seen_token && sent_token) {*/
+        if (seen_token) {
             break;
         }
 
@@ -255,8 +255,8 @@ int main(int argc, char **argv)
                     }
 
                     /** set token for sending to neighbor **/
-                    tkn = (token *) buffer;
-                    tkn->from_addr = my_addr;
+                    tkn = *((token *) buffer);
+                    tkn.from_addr = my_addr;
                }
             /** If ip_packet **/
             } else if (packet_type == 2) {
@@ -288,10 +288,22 @@ int main(int argc, char **argv)
 
     for(;;)
     {
-        temp_mask = mask;
-        num = select( FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, NULL);
-        if (num > 0) {
-            bytes = recv( sr, mess_buf, sizeof(mess_buf), 0 );
+        if (has_token) {
+            temp_mask = mask;
+            num = select( FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, NULL);
+            if (num > 0) {
+                bytes = recv_dbg( sr, (char *) buffer, PACKET_SIZE, 0 );
+                packet_type = buffer->type;
+                if (packet_type == 1) {
+                    if (((token *)buffer)->aru != -1) {
+                        tkn_ack->aru = -1;
+                        tkn_ack->type = 1;
+                        tkn_ack->from_addr = my_addr;
+                        sendto( ss, tkn_ack, sizeof(token), 0, 
+                            (struct sockaddr *)&(((token *)buffer)->from_addr), sizeof(((token *)buffer)->from_addr) );
+                    }
+                }
+            }
         }
     }
 
@@ -306,7 +318,7 @@ void send_token() {
             (struct sockaddr *)&send_addr, sizeof(send_addr) );
 
         /** send token **/
-        sendto( ss, tkn, sizeof(token), 0, 
+        sendto( ss, &tkn, sizeof(token), 0, 
             (struct sockaddr *)&neighbor, sizeof(neighbor) );
 
         /** wait for an ack, if timeout, send another token **/
@@ -323,10 +335,17 @@ void send_token() {
                     sent_token = 1;
                     break;
                 } else if (((token *)buffer)->aru == 0) {
+                    /** This means token has made it around despite lack of acks, stop expecting acks, start sending acks, and break**/
+                    tkn = *((token *)buffer);
+                    has_token = 1;
+                    seen_token = 1;
+                    tkn_ack->aru = -1;
+                    tkn_ack->type = 1;
+                    tkn_ack->from_addr = my_addr;
                     sendto( ss, tkn_ack, sizeof(token), 0, 
                         (struct sockaddr *)&(((token *)buffer)->from_addr), sizeof(((token *)buffer)->from_addr) );
-                        printf("\nI sent an ack, here's the proof: %d %d", tkn_ack->aru, tkn_ack->type);
-
+                    printf("\nI sent an ack, here's the proof: %d %d\n-------------\nMy token was from %s\n", tkn_ack->aru, tkn_ack->type, inet_ntoa(((token *)buffer)->from_addr.sin_addr));
+                    break;
                 }
             }
         }

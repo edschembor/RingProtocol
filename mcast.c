@@ -176,7 +176,7 @@ int main(int argc, char **argv)
         tkn->type = 1;
 		tkn->sequence = 0;
 		tkn->aru = 0;
-        tkn->from_addr = name;
+        tkn->from_addr = my_addr;
         has_token = 1;
 	}
 
@@ -193,6 +193,7 @@ int main(int argc, char **argv)
         temp_mask = mask;
 
         /*If I've seen the token and I've sent it successfully, I end*/
+        printf("\n%d %d\n", seen_token, sent_token);
         if (seen_token && sent_token) {
             break;
         }
@@ -208,19 +209,30 @@ int main(int argc, char **argv)
         if (num > 0) {
             bytes = recv_dbg( sr, (char *) buffer, PACKET_SIZE, 0 );
             packet_type = buffer->type;
-    /*        printf("\nBuffer Type: %d\n", buffer->type);
-            printf("\nIndex: %d\n", ((ip_packet *)buffer)->machine_index);*/
+            /*printf("\nBuffer Type: %d\n", buffer->type);
+            printf("\nIndex: %d\n", ((ip_packet *)buffer)->machine_index);
+            */
             if (packet_type == 1) {
                 printf("\nI got a token and it's %d big!\n", bytes);
+
                 has_token = 1;
                 seen_token = 1;
+                tkn_ack->type = 1;
                 tkn_ack->aru = -1;
+                tkn_ack->from_addr = my_addr; /*DELETE LATER*/
+                printf("buffer from: %s", inet_ntoa(((token *)buffer)->from_addr.sin_addr));
                 sendto( ss, tkn_ack, sizeof(token), 0, 
                     (struct sockaddr *)&(((token *)buffer)->from_addr), sizeof(((token *)buffer)->from_addr) );
+                if (machine_index == 1) {
+                    printf("\nI'm 1 and I got the token, acking it and ending\n");
+                    break;
+                }
+                tkn = (token *) buffer;
+                tkn->from_addr = my_addr;
                
             } else if (packet_type == 2) {
                 if (((ip_packet *) buffer)->machine_index == ((machine_index % num_machines) + 1)) {
-                printf("\nI got a ip_packet and it's %d big!\n", bytes);
+                    printf("\nI got a ip_packet and it's %d big!\n", bytes);
                     neighbor = ((ip_packet *) buffer) -> addr;
                     has_neighbor = 1;
                     printf("\nI found my neighbor!\n");
@@ -234,7 +246,7 @@ int main(int argc, char **argv)
     }
 
     printf("\nI BROKE OUT\n");
-
+/*
     for(;;)
     {
         temp_mask = mask;
@@ -253,14 +265,15 @@ int main(int argc, char **argv)
             }
         }
     }
-
+*/
     return 0;
 
 }
 
 void send_token() {
     for (;;) {
-        sendto( ss, buffer, sizeof(token), 0, 
+        printf("%\ns\n", inet_ntoa(tkn->from_addr.sin_addr));
+        sendto( ss, tkn, sizeof(token), 0, 
             (struct sockaddr *)&neighbor, sizeof(neighbor) );
        /* printf("%s\n", inet_ntoa(neighbor.sin_addr));
         */
@@ -268,10 +281,13 @@ void send_token() {
         timeout.tv_usec = 50000;
         num = select( FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, &timeout);
         if (num > 0) {
+            printf("\nI'm in here");
             bytes = recv_dbg( sr,(char *) buffer, PACKET_SIZE, 0 );
             if ((buffer->type == 1) && (((token *)buffer)->aru == -1)) {
+                printf("\nI got the ack! It's from %s\n", inet_ntoa(((token *)buffer)->from_addr.sin_addr));
                 has_token = 0;
                 sent_token = 1;
+                break;
             }
         }
     }

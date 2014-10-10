@@ -1,4 +1,4 @@
-#define PACKET_SIZE 1212
+#define PACKET_SIZE 5000 /*change back to 1212*/
 #define PAYLOAD 1200
 
 typedef struct packet_struct{

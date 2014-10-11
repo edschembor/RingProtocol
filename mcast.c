@@ -289,8 +289,11 @@ int main(int argc, char **argv)
     for(;;)
     {
         if (has_token) {
-            temp_mask = mask;
-            num = select( FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, NULL);
+            
+			/*If receive a token and already have a token, send an ack*/
+			temp_mask = mask;
+			num = select(FD_SETSIZE,&temp_mask,&dummy_mask,&dummy_mask,
+				&timeout);
             if (num > 0) {
                 bytes = recv_dbg( sr, (char *) buffer, PACKET_SIZE, 0 );
                 packet_type = buffer->type;

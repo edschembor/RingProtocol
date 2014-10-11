@@ -1,4 +1,4 @@
-#define RETRANS_SIZE 1000
+#define RETRANS_SIZE 300
 #define PROCESS_COUNT 10
 
 typedef struct token_struct {

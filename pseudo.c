@@ -10,7 +10,6 @@ for(;;) {
 	if(has_token) {
 	
 		/*If receive token, send ack*/
-		/*Set timeout?*/
 		num = select( FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, &timeout);
         if (num > 0) {
             bytes = recv_dbg( sr, (char *) buffer, PACKET_SIZE, 0 );
@@ -29,18 +28,29 @@ for(;;) {
 
 		/*If you have any packets in the retrans in your packet holding
 		 * array, send them*/
+		/*Could definitely be more efficient*/
 		for(i = 0; i < RETRANS_SIZE; i++) {
-			if(holding[i%HOLDING_SIZE]->packet_index == tkn.retransmission_request[i]) {
-				sendto( ss, holding[i%HOLDING_SIZE], sizeof(packet), 0, (struct sockaddr *)&send_addr, 
-					sizeof(send_addr) );
+			for(j = 0; j < HOLDING_SIZE; j++) {
+				if(holding[j]->packet_index == tkn.retransmission_request[i]) {
+					sendto(ss, holding[j], sizeof(packet), 0, (struct sockaddr *)&send_addr, sizeof(send_addr) );
+					break;
+				}
 			}
 		}
 		
 
 		/*Add missing packets to the rtr array in the token*/
 		for(i = 0; i < FRAME_SIZE; i++) {
-			if(frame[i]->packet_index < last_written) {
-				/*Add to rtr if not already in it*/
+			if((frame[i]->packet_index < last_written) && (frame[i]->packet_index+FRAME_SIZE <= num_packets)) {
+				for(j = 0; j< RETRANS_SIZE; j++) {
+					if(tkn.retransmission_request[i] == -1) {
+						retransmission_request[i] = frame[i]->packet_index+FRAME_SIZE;
+						break;
+					}
+					if(tkn.retransmission_request[i] == frame[i]->packet_index+FRAME_SIZE) {
+						break;
+					}
+				}
 			}
 		}
 

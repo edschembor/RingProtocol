@@ -6,8 +6,8 @@ typedef struct token_struct {
     int type;
 	int sequence;
 	int aru;
-	struct sockaddr_in from_addr;
+	int last_lowered;
 	int retransmission_request[RETRANS_SIZE];
-	int is_finished[PROCESS_COUNT];
+	char is_connected;
 
 } token;

@@ -13,6 +13,9 @@
 #include "recv_dbg.h"
 #include <errno.h>
 
+#define HOLDING_SIZE 100
+#define FRAME_SIZE 250
+
 void recv_dbg_init(int percent, int machine_index);
 
 void send_token();
@@ -21,6 +24,7 @@ struct sockaddr_in name;
 struct sockaddr_in send_addr;
 struct sockaddr_in my_addr; /*Address for this machine*/
 struct sockaddr_in neighbor; /*Address for the machine after*/
+struct timeval     start, end;
 
 struct hostent     h_ent;
 struct hostent     *p_h_ent;
@@ -39,7 +43,7 @@ char               machine_name[NAME_LENGTH] = {'\0'};
 struct ip_mreq     mreq;
 unsigned char      ttl_val;
 
-int                ss,sr,i;
+int                ss,sr,i,j;
 fd_set             mask;
 fd_set             dummy_mask,temp_mask;
 int                bytes;
@@ -58,6 +62,11 @@ token              tkn;
 ip_packet          *i_packet;
 packet             *buffer;
 
+int                local_aru = 0;
+
+packet             *holding[HOLDING_SIZE];
+packet             *frame[FRAME_SIZE];
+
 int main(int argc, char **argv)
 {
 
@@ -66,6 +75,9 @@ int main(int argc, char **argv)
         printf("Usage: mcast <num_packets> <machine_index> <num_of_machines> <loss_rate>\n");
 		exit(0);
 	}
+
+	/*Get the start time*/
+	gettimeofday(&start, NULL);
 
 	/*Set variables from input*/
     num_packets = atoi(argv[1]);
@@ -177,7 +189,7 @@ int main(int argc, char **argv)
 	/*The first process creates the initial token*/
     if(machine_index == 1) {
         for(i = 0; i < RETRANS_SIZE; i++) {
-            tkn.retransmission_request[i] = -1; /*??*/
+            tkn.retrans_req[i] = -1; /*??*/
 		}
 		/*for(i = 0; i < tkn->is_finished; i++) {
             tkn->is_finished[i] = 0;
@@ -185,7 +197,6 @@ int main(int argc, char **argv)
         tkn.type = 1;
 		tkn.sequence = 0;
 		tkn.aru = 0;
-        tkn.from_addr = my_addr;
         has_token = 1;
 	}
 
@@ -280,9 +291,69 @@ int main(int argc, char **argv)
    
 			/*Logic for updating the token*/
 			if((tkn.aru > local_aru) || (machine_index == tkn.last_lowered)) {
-				tkn.aru = loca_aru;
-				tkn.last_lowered = mahined_index;
+				tkn.aru = local_aru;
+				tkn.last_lowered = machine_index;
 			}
+
+			/*If you have any packets in the retrans in your packet holding array, send them*/
+			/*Can be more efficient ---> YES, mod the index of the missing packet, then it will be O(n)*/
+			for(i = 0; i < RETRANS_SIZE; i++) {
+				for(j = 0; j < HOLDING_SIZE; j++) {
+					if(holding[j]->packet_index == tkn.retrans_req[i]) {
+						sendto(ss,holding[j],sizeof(packet),0,(struct sockaddr *)&send_addr,sizeof(send_addr));
+						break;
+					}
+				}
+			}
+
+			/*Add missing packets to the rtr array in the token*/
+			for(i = 0; i < FRAME_SIZE; i++) {
+				if((frame[i]->packet_index<last_written)&&(frame[i]->packet_index+FRAME_SIZE<=num_packes)) {
+					for(j = 0; j < RETRANS_SIZE; j++) {
+						if(tkn.retrans_req[i] == -1) {
+							retrans_req[i] = frame[i]->packet_index+FRAME_SIZE;
+							break;
+						}else if(tkn.retrans_req[i] == frame[i]->packet_index+FRAME_SIZE) {
+							break;
+						}
+					}
+				}
+			}
+
+			/**/
+			if(sent_packets < num_packets) {
+
+				/*Update your frame so that it is filled and has no packets
+				 * which have been received by all processes*/
+				/*sent_packets++*/
+			}else{
+				if(local_aru == tkn.sequence == tkn.aru) {
+					/*Finishing logic*/
+				}
+			}
+
+			/*Multicast all packets in your frame*/
+			for(i = 0; i < FRAME_SIZE; i++) {
+				
+				/*Multicast the packet*/
+				sendto(ss, frame[i], sizeof(packet),0,(struct sockaddr *)&send_addr, sizeof(send_addr));
+
+				/*Update token -- is the first if right???*/
+				if((tkn.aru == tkn.sequence) && (local_aru == tkn.aru)) {
+					tkn.aru++;
+				}
+				if(packet->index > tkn.sequence) {
+					tkn.sequence = packet.index;
+				}
+
+			}
+
+			/*Set the last seen ARU*/
+			last_seen_aru = tkn.aru;
+
+			/*Send the token to the neighbor processes*/
+			sendto(ss, &tkn, sizeof(token), 0, (struct sockaddr *)&neighbor, sizeof(neighbor));
+
 
 		}else{
 			/*If receive a token and already have a token, send an ack*/
@@ -304,30 +375,14 @@ int main(int argc, char **argv)
 		}
     }
 
+	final_report();
     return 0;
 
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+void final_report() {
+	gettimeofday(&end, NULL);
+	printf("\n*******PROCESS HAS ENDED**********"):
+	printf("\nTotal Time Taken: %d \n", ((end.tv_sec*1000000 + end.tv_usec) - 
+		(start.tv_sec * 1000000 + start.tv_usec)));
+}

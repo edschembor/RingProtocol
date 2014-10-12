@@ -7,7 +7,7 @@ typedef struct token_struct {
 	int sequence;
 	int aru;
 	int last_lowered;
-	int retransmission_request[RETRANS_SIZE];
+	int retrans_req[RETRANS_SIZE];
 	char is_connected;
 
 } token;

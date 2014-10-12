@@ -73,7 +73,7 @@ for(;;) {
 			/*Multicast packet*/
 			sendto( ss, frame[i], sizeof(packet), 0, (struct sockaddr *)&send_addr, sizeof(send_addr) );
 			
-			/*Update token*/
+			/*Update token */
 			if((tkn.aru == tkn.sequence) && (local_aru==tkn.aru)){
 				tkn.aru++;
 			}

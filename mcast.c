@@ -17,6 +17,7 @@
 
 #define HOLDING_SIZE 100
 #define FRAME_SIZE 250
+
 #define USED_CLOCK CLOCK_MONOTONIC /* CLOCK_MONOTONIC_RAW if available*/
 #define NANOS 1000000000LL
 
@@ -32,7 +33,7 @@ struct sockaddr_in neighbor; /*Address for the machine after*/
 struct timeval     start, end;
 
 struct timespec    begin, current;
-long               startt, elapsed, microseconds;
+long long          startt, elapsed, microseconds;
 
 struct hostent     h_ent;
 struct hostent     *p_h_ent;
@@ -71,7 +72,6 @@ ip_packet          *i_packet;
 packet             *buffer;
 
 int                local_aru = 0;
-int                last_written = 0;
 int                sent_packets = 0;
 int                last_seen_aru = 0;
 packet             *holding[HOLDING_SIZE];
@@ -242,7 +242,6 @@ int main(int argc, char **argv)
             }
             elapsed = current.tv_sec*NANOS + current.tv_nsec - startt;
             microseconds = elapsed / 1000 + (elapsed % 1000 >= 500); /* round up halves*/
-            printf("\n%lu\n",microseconds);
 			if(microseconds > 100000) {
 				has_token = 1;
                 if (clock_gettime(USED_CLOCK, &begin)) {
@@ -302,10 +301,10 @@ int main(int argc, char **argv)
         }
     }
 
-    printf("\nI BROKE OUT\n");
+    printf("\n----------------------I BROKE OUT--------------------\n");
 	if(has_token) {
-		printf("\nI have the token\n");
-		exit(0);
+		printf("\n---------------------I have the token------------------\n");
+        tkn.is_connected = 1;
 	}
 
 
@@ -317,6 +316,9 @@ int main(int argc, char **argv)
 
     for(;;)
     {
+        /**********************
+         * HAVE TOKEN -- MULTICASTING 
+         * ********************/
         if (has_token) {
    
 			/*Logic for updating the token*/
@@ -338,7 +340,7 @@ int main(int argc, char **argv)
 
 			/*Add missing packets to the rtr array in the token*/
 			for(i = 0; i < FRAME_SIZE; i++) {
-				if((frame[i]->packet_index<last_written)&&(frame[i]->packet_index+FRAME_SIZE<=num_packets)) {
+				if((frame[i]->packet_index<local_aru)&&(frame[i]->packet_index+FRAME_SIZE<=num_packets)) {
 					for(j = 0; j < RETRANS_SIZE; j++) {
 						if(tkn.retrans_req[i] == -1) {
 							tkn.retrans_req[i] = frame[i]->packet_index+FRAME_SIZE;
@@ -385,20 +387,45 @@ int main(int argc, char **argv)
 			sendto(ss, &tkn, sizeof(token), 0, (struct sockaddr *)&neighbor, sizeof(neighbor));
 
 
-		}else{
-			/*If receive a token and already have a token, send an ack*/
+        /**********************
+         * DON'T HAVE TOKEN -- RECEIVING
+         * ********************/
+		} else {
+
+            /** Receive packet or token**/
 			temp_mask = mask;
 			num = select(FD_SETSIZE,&temp_mask,&dummy_mask,&dummy_mask,
 				&timeout);
             if (num > 0) {
                 bytes = recv_dbg( sr, (char *) buffer, PACKET_SIZE, 0 );
                 packet_type = buffer->type;
-                if (packet_type == 1) {
+
+                /** Received packet **/
+                if (packet_type == 0) {
+
+                    /** If the packet's index > local ARU, add to holding array **/
+                    if (buffer->packet_index > local_aru) {
+                        holding[buffer->packet_index % FRAME_SIZE] = buffer; 
+                    }
+
+                    /** First packet in holding array edge case, write and update **/
+                    if (local_aru == -1 && frame[0]->index != -1) {
+                        local_aru++;
+                        /* WRITE */
+                    }
+
+                    /** Write all packets you can**/
+                    while (frame[local_aru % FRAME_SIZE] <= frame[(local_aru+1) % FRAME_SIZE]) {
+                        /* WRITE */
+                        local_aru = frame[(local_aru) % FRAME_SIZE]->packet_index;
+                    }
+                    /** Received token **/
+                } else if (packet_type == 1) {
 					tkn = *((token *)buffer);
 					if(!tkn.is_connected) {
 						printf("\nI sent the token! From main loop\n");
 						sendto( ss, &tkn, sizeof(token), 0, 
-						(struct sockaddr *)&neighbor, sizeof(neighbor) );
+                            (struct sockaddr *)&neighbor, sizeof(neighbor) );
 					}
                 }
             }

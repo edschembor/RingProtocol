@@ -99,8 +99,6 @@ for(;;) {
 			/*If Receive type=0, you got data packet */
 			if(packet_type == 0) {
 
-				/*Cast to packet --->> Is it already packet?*/
-
 				/*If the packet's index > local ARU, add to holder array*/
 
 				/*Update local ARU*/

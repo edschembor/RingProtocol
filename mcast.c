@@ -13,9 +13,12 @@
 #include "recv_dbg.h"
 #include <errno.h>
 #include <sys/time.h>
+#include <time.h>
 
 #define HOLDING_SIZE 100
 #define FRAME_SIZE 250
+#define USED_CLOCK CLOCK_MONOTONIC /* CLOCK_MONOTONIC_RAW if available*/
+#define NANOS 1000000000LL
 
 void recv_dbg_init(int percent, int machine_index);
 void final_report();
@@ -28,7 +31,8 @@ struct sockaddr_in my_addr; /*Address for this machine*/
 struct sockaddr_in neighbor; /*Address for the machine after*/
 struct timeval     start, end;
 
-struct timeval     start_timeout, end_timeout;
+struct timespec    begin, current;
+long               startt, elapsed, microseconds;
 
 struct hostent     h_ent;
 struct hostent     *p_h_ent;
@@ -204,7 +208,11 @@ int main(int argc, char **argv)
 		tkn.sequence = 0;
 		tkn.aru = 0;
         has_token = 1;
-		gettimeofday(&start_timeout, NULL);
+        if (clock_gettime(USED_CLOCK, &begin)) {
+            /* Oops, getting clock time failed */
+            exit(EXIT_FAILURE);
+        }
+        startt = begin.tv_sec*NANOS + begin.tv_nsec;
 	}
 
     /*Connect this process to the next process*/
@@ -228,10 +236,20 @@ int main(int argc, char **argv)
 
 		/*Check if process 1 timed out, which means the token was lost*/
 		if(machine_index == 1) {
-			gettimeofday(&end_timeout, NULL);
-			if(end_timeout.tv_usec - start_timeout.tv_usec > 100000) {
+            if (clock_gettime(USED_CLOCK, &current)) {
+                /* getting clock time failed, what now? */
+                exit(EXIT_FAILURE);
+            }
+            elapsed = current.tv_sec*NANOS + current.tv_nsec - startt;
+            microseconds = elapsed / 1000 + (elapsed % 1000 >= 500); /* round up halves*/
+            printf("\n%lu\n",microseconds);
+			if(microseconds > 100000) {
 				has_token = 1;
-				gettimeofday(&start_timeout, NULL);
+                if (clock_gettime(USED_CLOCK, &begin)) {
+                    /* Oops, getting clock time failed */
+                    exit(EXIT_FAILURE);
+                }
+                startt = begin.tv_sec*NANOS + begin.tv_nsec;
 				printf("\nPROCESS 1 TIMED OUT*************\n");
 			}
 		}

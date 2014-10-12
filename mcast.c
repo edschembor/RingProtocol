@@ -12,11 +12,13 @@
 #include "ip_packet.h"
 #include "recv_dbg.h"
 #include <errno.h>
+#include <sys/time.h>
 
 #define HOLDING_SIZE 100
 #define FRAME_SIZE 250
 
 void recv_dbg_init(int percent, int machine_index);
+void final_report();
 
 void send_token();
 
@@ -25,6 +27,8 @@ struct sockaddr_in send_addr;
 struct sockaddr_in my_addr; /*Address for this machine*/
 struct sockaddr_in neighbor; /*Address for the machine after*/
 struct timeval     start, end;
+
+struct timeval     start_timeout, end_timeout;
 
 struct hostent     h_ent;
 struct hostent     *p_h_ent;
@@ -63,7 +67,9 @@ ip_packet          *i_packet;
 packet             *buffer;
 
 int                local_aru = 0;
-
+int                last_written = 0;
+int                sent_packets = 0;
+int                last_seen_aru = 0;
 packet             *holding[HOLDING_SIZE];
 packet             *frame[FRAME_SIZE];
 
@@ -198,6 +204,7 @@ int main(int argc, char **argv)
 		tkn.sequence = 0;
 		tkn.aru = 0;
         has_token = 1;
+		gettimeofday(&start_timeout, NULL);
 	}
 
     /*Connect this process to the next process*/
@@ -219,19 +226,23 @@ int main(int argc, char **argv)
     {
         temp_mask = mask;
 
+		/*Check if process 1 timed out, which means the token was lost*/
+		if(machine_index == 1) {
+			gettimeofday(&end_timeout, NULL);
+			if(end_timeout.tv_usec - start_timeout.tv_usec > 100000) {
+				has_token = 1;
+				gettimeofday(&start_timeout, NULL);
+				printf("\nPROCESS 1 TIMED OUT*************\n");
+			}
+		}
+
         /*If I've seen the token and I've sent it successfully, I end*/
         if (seen_token && has_neighbor) {
             break;
         }
 
-		if(machine_index == 1) {
-			/*If it is the first machine, we need a timeout*/
-			timeout.tv_usec = 50000;
-			num = select( FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask,
-				&timeout);
-		} else {
-			num = select(FD_SETSIZE,&temp_mask,&dummy_mask,&dummy_mask, &timeout);
-		}
+		timeout.tv_usec = 50000;
+		num = select(FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, &timeout);
 
         if (num > 0) {
             /** receive packet **/
@@ -276,6 +287,7 @@ int main(int argc, char **argv)
     printf("\nI BROKE OUT\n");
 	if(has_token) {
 		printf("\nI have the token\n");
+		exit(0);
 	}
 
 
@@ -308,10 +320,10 @@ int main(int argc, char **argv)
 
 			/*Add missing packets to the rtr array in the token*/
 			for(i = 0; i < FRAME_SIZE; i++) {
-				if((frame[i]->packet_index<last_written)&&(frame[i]->packet_index+FRAME_SIZE<=num_packes)) {
+				if((frame[i]->packet_index<last_written)&&(frame[i]->packet_index+FRAME_SIZE<=num_packets)) {
 					for(j = 0; j < RETRANS_SIZE; j++) {
 						if(tkn.retrans_req[i] == -1) {
-							retrans_req[i] = frame[i]->packet_index+FRAME_SIZE;
+							tkn.retrans_req[i] = frame[i]->packet_index+FRAME_SIZE;
 							break;
 						}else if(tkn.retrans_req[i] == frame[i]->packet_index+FRAME_SIZE) {
 							break;
@@ -327,7 +339,7 @@ int main(int argc, char **argv)
 				 * which have been received by all processes*/
 				/*sent_packets++*/
 			}else{
-				if(local_aru == tkn.sequence == tkn.aru) {
+				if((local_aru == tkn.sequence) && (tkn.sequence==tkn.aru)) {
 					/*Finishing logic*/
 				}
 			}
@@ -342,8 +354,8 @@ int main(int argc, char **argv)
 				if((tkn.aru == tkn.sequence) && (local_aru == tkn.aru)) {
 					tkn.aru++;
 				}
-				if(packet->index > tkn.sequence) {
-					tkn.sequence = packet.index;
+				if(frame[i]->packet_index > tkn.sequence) {
+					tkn.sequence = frame[i]->packet_index;
 				}
 
 			}
@@ -382,7 +394,7 @@ int main(int argc, char **argv)
 
 void final_report() {
 	gettimeofday(&end, NULL);
-	printf("\n*******PROCESS HAS ENDED**********"):
-	printf("\nTotal Time Taken: %d \n", ((end.tv_sec*1000000 + end.tv_usec) - 
-		(start.tv_sec * 1000000 + start.tv_usec)));
+	printf("\n*******PROCESS HAS ENDED**********");
+	printf("\nTotal Time Taken: %lu \n", ((end.tv_sec*1000000 + end.tv_usec)
+		- (start.tv_sec * 1000000 + start.tv_usec)));
 }

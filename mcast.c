@@ -65,10 +65,12 @@ int                num_packets;
 int                machine_index;
 int                num_machines;
 int                loss_rate;
-token              *tkn_ack;
+
 token              tkn;
 ip_packet          *i_packet;
 packet             *buffer;
+packet             *machine_finished; /*Tells other machines this is done*/
+packet             *all_machines_finished; /*Tells others all are done*/
 
 int                local_aru = 0;
 int                sent_packets = 0;
@@ -77,6 +79,7 @@ packet             *holding[HOLDING_SIZE];
 packet             *frame[FRAME_SIZE];
 FILE               *file;
 int                highest_received = 0;
+int                num_finished = 0;
 
 int main(int argc, char **argv)
 {
@@ -96,6 +99,9 @@ int main(int argc, char **argv)
 	num_machines = atoi(argv[3]);
 	loss_rate = atoi(argv[4]);
 
+	/*Create array to store which machines have finished*/
+	char machines_finished[num_machines];
+
 	/*Open file for writing*/
 	if ((file = fopen(machine_index + ".out", "w")) == NULL) {
 		perror("fopen");
@@ -105,16 +111,25 @@ int main(int argc, char **argv)
     /*Initialize loss rate*/
     recv_dbg_init(loss_rate, machine_index);
 
+	/*Seed random number generator for future use*/
+	srand(time(NULL));
+
     /*Malloc all needed memory*/
 	received_packet = malloc(sizeof(packet));
 	i_packet = malloc(sizeof(ip_packet));
-    tkn_ack = malloc(sizeof(token));
     buffer = malloc(PACKET_SIZE);
 	for(i = 0; i < FRAME_SIZE; i++) {
 		frame[i] = malloc(sizeof(packet));
 	}
 	for(i = 0; i < HOLDING_SIZE; i++) {
 		holding[i] = malloc(sizeof(packet));
+	}
+	machine_finished = malloc(sizeof(packet));
+	all_machines_finished = malloc(sizeof(packet));
+
+	/*Initialize machines_finished array*/
+	for(i = 0; i < num_machines; i++) {
+		machines_finished[i] = 0;
 	}
 
 	/*Creates the mcast address*/
@@ -222,7 +237,7 @@ int main(int argc, char **argv)
 		tkn.aru = 0;
         has_token = 1;
         if (clock_gettime(USED_CLOCK, &begin)) {
-            /* Oops, getting clock time failed */
+            /* Getting clock time failed */
             exit(EXIT_FAILURE);
         }
         startt = begin.tv_sec*NANOS + begin.tv_nsec;
@@ -342,17 +357,17 @@ int main(int argc, char **argv)
 
 			/*If you have any packets in the retrans in your 
 			 * packet holding array, send them*/
-			for(i = 0; i < RETRANS_SIZE; i++) {
+			/*for(i = 0; i < RETRANS_SIZE; i++) {
 				if(holding[tkn.retrans_req[i] % HOLDING_SIZE]->packet_index == tkn.retrans_req[i]) {
 					sendto(ss, holding[tkn.retrans_req[i] % HOLDING_SIZE], 
 						sizeof(packet), 0, (struct sockaddr *)&send_addr,
 						sizeof(send_addr));
 				}
-			}
+			}*/
 
 			/*Add missing packets to the rtr array in the token*/
 			int temp = local_aru; /*the index last added to retrans*/
-			for(i = 0; i < RETRANS_SIZE; i++) {
+			/*for(i = 0; i < RETRANS_SIZE; i++) {
 				if(tkn.retrans_req[i] == -1) {
 					for(int j = temp; j < highest_received; j++) {
 						if(holding[j%HOLDING_SIZE]->packet_index < local_aru) {
@@ -362,7 +377,7 @@ int main(int argc, char **argv)
 						}
 					}
 				}
-			}
+			}*/
 
 
 
@@ -371,21 +386,37 @@ int main(int argc, char **argv)
 
 				/*Update your frame so that it is filled and has no packets
 				 * which have been received by all processes*/
-				/*sent_packets++*/
+				/*frame[i]->random_number = srand();*/
+				/*frame[i]->type = 0 ????*/
+				/*frame[i]->machine_index = machine_index;*/
+				/*frame[i]->packet_index = sent_packets++*/
+				/*^^^Need to account for other processes*/
 			}else{
-				if((local_aru == tkn.sequence) && (tkn.sequence==tkn.aru)) {
+				if((local_aru == tkn.sequence) && (tkn.sequence == tkn.aru)) {
 					/*Finishing logic*/
+
+					/*Set up machine_finished packet and multicast it*/
+					printf("\nMACHINE %d FINISHED\n", machine_index);
+					machine_finished->type = 3;
+					machine_finished->machine_index = machine_index;
+					sendto(ss, machine_finished, sizeof(packet), 0, 
+						(struct sockaddr *)&send_addr, sizeof(send_addr) );
+
+					if(machines_finished[machine_index-1] == 0) {
+						machines_finished[machine_index-1] = 1;
+						num_finished++;
+					}
 				}
 			}
 
 			/*Multicast all packets in your frame*/
-			for(i = 0; i < FRAME_SIZE; i++) {
+			/*for(i = 0; i < FRAME_SIZE; i++) {
 				
 				/*Multicast the packet*/
-				sendto(ss, frame[i], sizeof(packet),0,(struct sockaddr *)&send_addr, sizeof(send_addr));
+			/*	sendto(ss, frame[i], sizeof(packet),0,(struct sockaddr *)&send_addr, sizeof(send_addr));
 
 				/*Update token -- is the first if right???*/
-				if((tkn.aru == tkn.sequence) && (local_aru == tkn.aru)) {
+			/*	if((tkn.aru == tkn.sequence) && (local_aru == tkn.aru)) {
 					tkn.aru++;
 				}
 				if(frame[i]->packet_index > tkn.sequence) {
@@ -395,10 +426,11 @@ int main(int argc, char **argv)
 			}
 
 			/*Set the last seen ARU*/
-			last_seen_aru = tkn.aru;
+			/*last_seen_aru = tkn.aru;
 
 			/*Send the token to the neighbor processes*/
 			sendto(ss, &tkn, sizeof(token), 0, (struct sockaddr *)&neighbor, sizeof(neighbor));
+			has_token = 0;
 
 
         /**********************
@@ -408,6 +440,26 @@ int main(int argc, char **argv)
 
             /** Receive packet or token**/
 			temp_mask = mask;
+
+			/*Check if process 1 timed out, which means the token was lost*/
+			if(machine_index == 1) {
+				if (clock_gettime(USED_CLOCK, &current)) {
+					/* getting clock time failed, what now? */
+					exit(EXIT_FAILURE);
+				}
+				elapsed = current.tv_sec*NANOS + current.tv_nsec - startt;
+				microseconds = elapsed / 1000 + (elapsed % 1000 >= 500);
+				if(microseconds > 100000) {
+					has_token = 1;
+					if (clock_gettime(USED_CLOCK, &begin)) {
+						/* Oops, getting clock time failed */
+						exit(EXIT_FAILURE);
+					}
+					startt = begin.tv_sec*NANOS + begin.tv_nsec;
+					printf("\nPROCESS 1 TIMED OUT*************\n");
+				}
+			}
+
 			num = select(FD_SETSIZE,&temp_mask,&dummy_mask,&dummy_mask,
 				&timeout);
             if (num > 0) {
@@ -450,10 +502,55 @@ int main(int argc, char **argv)
 					}else {
 						has_token = 1;
 					}
-                }
+
+				/** Received a machine finished packet **/	
+                } else if (packet_type == 3) {
+					if(machines_finished[buffer->machine_index] == 0) {
+						machines_finished[buffer->machine_index] = 1;
+						num_finished++;
+						printf("\nGot process finished:  %d\n", buffer->machine_index);
+					}
+					printf("\nNum finished = %d\n", num_finished);
+					/** Check if all machines have finished **/
+					if(num_finished == num_machines) {
+						all_machines_finished->type = 4;
+						sendto(ss, all_machines_finished, sizeof(packet), 0, 
+							(struct sockaddr *)&send_addr,sizeof(send_addr));
+						printf("\n------ALL FINISHED-----------\n");
+						break;
+					}
+
+				/** Received an all finished packet **/
+				} else if (packet_type == 4) {
+					printf("\n-----GOT ALL FINISHED----\n");
+					all_machines_finished->type = 4;
+					sendto(ss, all_machines_finished, sizeof(packet), 0, 
+						(struct sockaddr *)&send_addr, sizeof(send_addr) );
+					break;
+				}
             }
 		}
     }
+
+	/** Free all malloc'd memory **/
+	/*printf("\nFREED NONE\n");
+	free(received_packet);
+	printf("\nFREED 1\n");
+	free(i_packet);
+	printf("\nFREED 2\n");
+	free(buffer);
+	printf("\nFREED 3\n");
+	free(machine_finished);
+	printf("\nFREED 4\n");
+	free(all_machines_finished);
+	printf("\nFREED SOME\n");
+	for(i = 0; i < FRAME_SIZE; i++) {
+		free(frame[i]);
+	}
+	for(i = 0; i < HOLDING_SIZE; i++) {
+		free(holding[i]);
+	}
+	printf("\nFREED ALL\n");*/
 
 	fclose(file);
 	final_report();

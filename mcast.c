@@ -23,8 +23,7 @@
 
 void recv_dbg_init(int percent, int machine_index);
 void final_report();
-
-void send_token();
+void write_packet(packet *p);
 
 struct sockaddr_in name;
 struct sockaddr_in send_addr;
@@ -76,6 +75,8 @@ int                sent_packets = 0;
 int                last_seen_aru = 0;
 packet             *holding[HOLDING_SIZE];
 packet             *frame[FRAME_SIZE];
+FILE               *file;
+int                highest_received = 0;
 
 int main(int argc, char **argv)
 {
@@ -95,6 +96,12 @@ int main(int argc, char **argv)
 	num_machines = atoi(argv[3]);
 	loss_rate = atoi(argv[4]);
 
+	/*Open file for writing*/
+	if ((file = fopen(machine_index + ".out", "w")) == NULL) {
+		perror("fopen");
+		exit(0);
+	}
+
     /*Initialize loss rate*/
     recv_dbg_init(loss_rate, machine_index);
 
@@ -103,6 +110,12 @@ int main(int argc, char **argv)
 	i_packet = malloc(sizeof(ip_packet));
     tkn_ack = malloc(sizeof(token));
     buffer = malloc(PACKET_SIZE);
+	for(i = 0; i < FRAME_SIZE; i++) {
+		frame[i] = malloc(sizeof(packet));
+	}
+	for(i = 0; i < HOLDING_SIZE; i++) {
+		holding[i] = malloc(sizeof(packet));
+	}
 
 	/*Creates the mcast address*/
     mcast_addr = 225 << 24 | 1 << 16 | 2 << 8 | 103; /* (225.1.2.103) */
@@ -327,32 +340,33 @@ int main(int argc, char **argv)
 				tkn.last_lowered = machine_index;
 			}
 
-			/*If you have any packets in the retrans in your packet holding array, send them*/
-			/*Can be more efficient ---> YES, mod the index of the missing packet, then it will be O(n)*/
+			/*If you have any packets in the retrans in your 
+			 * packet holding array, send them*/
 			for(i = 0; i < RETRANS_SIZE; i++) {
-				for(j = 0; j < HOLDING_SIZE; j++) {
-					if(holding[j]->packet_index == tkn.retrans_req[i]) {
-						sendto(ss,holding[j],sizeof(packet),0,(struct sockaddr *)&send_addr,sizeof(send_addr));
-						break;
-					}
+				if(holding[tkn.retrans_req[i] % HOLDING_SIZE]->packet_index == tkn.retrans_req[i]) {
+					sendto(ss, holding[tkn.retrans_req[i] % HOLDING_SIZE], 
+						sizeof(packet), 0, (struct sockaddr *)&send_addr,
+						sizeof(send_addr));
 				}
 			}
 
 			/*Add missing packets to the rtr array in the token*/
-			for(i = 0; i < FRAME_SIZE; i++) {
-				if((frame[i]->packet_index<local_aru)&&(frame[i]->packet_index+FRAME_SIZE<=num_packets)) {
-					for(j = 0; j < RETRANS_SIZE; j++) {
-						if(tkn.retrans_req[i] == -1) {
-							tkn.retrans_req[i] = frame[i]->packet_index+FRAME_SIZE;
-							break;
-						}else if(tkn.retrans_req[i] == frame[i]->packet_index+FRAME_SIZE) {
+			int temp = local_aru; /*the index last added to retrans*/
+			for(i = 0; i < RETRANS_SIZE; i++) {
+				if(tkn.retrans_req[i] == -1) {
+					for(int j = temp; j < highest_received; j++) {
+						if(holding[j%HOLDING_SIZE]->packet_index < local_aru) {
+							tkn.retrans_req[i] = j;
+							temp = ++j;
 							break;
 						}
 					}
 				}
 			}
 
-			/**/
+
+
+			/*Check if you have sent all of your packets*/
 			if(sent_packets < num_packets) {
 
 				/*Update your frame so that it is filled and has no packets
@@ -403,35 +417,45 @@ int main(int argc, char **argv)
                 /** Received packet **/
                 if (packet_type == 0) {
 
-                    /** If the packet's index > local ARU, add to holding array **/
-                    if (buffer->packet_index > local_aru) {
-                        holding[buffer->packet_index % FRAME_SIZE] = buffer; 
+                    /** If the packet's index > local ARU, add to holding 
+					 * array **/
+                    if ((buffer->packet_index > local_aru) && !(buffer->packet_index > FRAME_SIZE+local_aru)) {
+                        holding[buffer->packet_index % FRAME_SIZE] = buffer;
+						if(buffer->packet_index > highest_received) {
+							highest_received = buffer->packet_index;
+						}
                     }
 
-                    /** First packet in holding array edge case, write and update **/
-                    if (local_aru == -1 && frame[0]->index != -1) {
+                    /** First packet in holding array edge case, write 
+					 * and update **/
+                    if (local_aru == -1 && frame[0]->packet_index != -1) {
                         local_aru++;
-                        /* WRITE */
+						write_packet(frame[0]);
+                        
                     }
 
                     /** Write all packets you can**/
                     while (frame[local_aru % FRAME_SIZE] <= frame[(local_aru+1) % FRAME_SIZE]) {
-                        /* WRITE */
+						write_packet(frame[local_aru % FRAME_SIZE + 1]);
                         local_aru = frame[(local_aru) % FRAME_SIZE]->packet_index;
                     }
-                    /** Received token **/
+                
+				/** Received token **/
                 } else if (packet_type == 1) {
 					tkn = *((token *)buffer);
 					if(!tkn.is_connected) {
 						printf("\nI sent the token! From main loop\n");
 						sendto( ss, &tkn, sizeof(token), 0, 
                             (struct sockaddr *)&neighbor, sizeof(neighbor) );
+					}else {
+						has_token = 1;
 					}
                 }
             }
 		}
     }
 
+	fclose(file);
 	final_report();
     return 0;
 
@@ -442,4 +466,9 @@ void final_report() {
 	printf("\n*******PROCESS HAS ENDED**********");
 	printf("\nTotal Time Taken: %lu \n", ((end.tv_sec*1000000 + end.tv_usec)
 		- (start.tv_sec * 1000000 + start.tv_usec)));
+}
+
+void write_packet(packet *p) {
+	fprintf(file, "%2d, %8d , %8d\n", p->machine_index, p->packet_index, 
+		p->random_number);
 }

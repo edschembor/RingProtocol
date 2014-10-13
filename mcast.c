@@ -349,6 +349,40 @@ int main(int argc, char **argv)
          * ********************/
         if (has_token) {
    
+			/*Check if you have received any process ended packets*/
+			temp_mask = mask;
+			num = select(FD_SETSIZE, &temp_mask, &dummy_mask, 
+				&dummy_mask, &timeout);
+            if (num > 0) {
+                bytes = recv_dbg( sr, (char *) buffer, PACKET_SIZE, 0 );
+                packet_type = buffer->type;
+				if (packet_type == 3) {
+					if(machines_finished[buffer->machine_index] == 0) {
+						machines_finished[buffer->machine_index] = 1;
+						num_finished++;
+						printf("\nGot process finished:  %d\n", buffer->machine_index);
+					}
+					printf("\nNum finished = %d\n", num_finished);
+					/** Check if all machines have finished **/
+					if(num_finished == num_machines) {
+						all_machines_finished->type = 4;
+						sendto(ss, all_machines_finished, sizeof(packet), 0, 
+							(struct sockaddr *)&send_addr,sizeof(send_addr));
+						printf("\n------ALL FINISHED-----------\n");
+						break;
+					}
+
+				/** Received an all finished packet **/
+				} else if (packet_type == 4) {
+					printf("\n-----GOT ALL FINISHED----\n");
+					all_machines_finished->type = 4;
+					sendto(ss, all_machines_finished, sizeof(packet), 0, 
+						(struct sockaddr *)&send_addr, sizeof(send_addr) );
+					break;
+				}
+			}	
+
+
 			/*Logic for updating the token*/
 			if((tkn.aru > local_aru) || (machine_index == tkn.last_lowered)) {
 				tkn.aru = local_aru;

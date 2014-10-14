@@ -107,9 +107,7 @@ int main(int argc, char **argv)
 	char machines_finished[num_machines];
 
 	/*Open file for writing*/
-	char filename[NAME_LENGTH];
-	sprintf(filename, "%d", machine_index);
-	strcat(filename, ".out");
+	char filename[NAME_LENGTH] = "TEMP";
 	printf("%s", filename);
 	if ((file = fopen(filename, "w")) == NULL) {
 		perror("fopen");
@@ -433,8 +431,7 @@ int main(int argc, char **argv)
 				 * which have been received by all processes*/
 				printf("\nGonna fill that frame\n");
 				printf("\nAll have: %d\n", all_have);
-				/** OLD FILL CODE **/
-				/*i = last_all_have;
+				i = last_all_have;
 				while(i <= all_have) {
 					printf("\nFilling: %d\n", i);
 					frame[i % FRAME_SIZE]->random_number = rand();
@@ -444,7 +441,7 @@ int main(int argc, char **argv)
 					frame[i % FRAME_SIZE]->packet_index = tkn.sequence++;
 					sent_packets++;
 					i++;
-				}*/
+				}
 
 			}else{
 				if((local_aru == tkn.sequence) && (tkn.sequence == tkn.aru) 

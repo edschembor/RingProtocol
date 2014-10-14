@@ -17,6 +17,7 @@
 
 #define HOLDING_SIZE 100
 #define FRAME_SIZE 250
+#define NAME_LENGTH 80
 
 #define USED_CLOCK CLOCK_MONOTONIC /* CLOCK_MONOTONIC_RAW if available*/
 #define NANOS 1000000000LL
@@ -106,7 +107,9 @@ int main(int argc, char **argv)
 	char machines_finished[num_machines];
 
 	/*Open file for writing*/
-	if ((file = fopen(machine_index + ".out", "w")) == NULL) {
+	char filename[NAME_LENGTH] = "TEMP";
+	printf("%s", filename);
+	if ((file = fopen(filename, "w")) == NULL) {
 		perror("fopen");
 		exit(0);
 	}
@@ -234,7 +237,7 @@ int main(int argc, char **argv)
 		}
         tkn.type = 1;
 		tkn.sequence = 0;
-		tkn.aru = 0;
+		tkn.aru = -1;
         has_token = 1;
         if (clock_gettime(USED_CLOCK, &begin)) {
             /* Getting clock time failed */
@@ -398,7 +401,7 @@ int main(int argc, char **argv)
 			/*If you have any packets in the retrans in your 
 			 * packet holding array, send them*/
 			for(i = 0; i < RETRANS_SIZE; i++) {
-				if(holding[tkn.retrans_req[i] % HOLDING_SIZE]->packet_index == tkn.retrans_req[i]) {
+				if((tkn.retrans_req[i] != -1) && (holding[tkn.retrans_req[i] % HOLDING_SIZE]->packet_index == tkn.retrans_req[i])) {
 					sendto(ss, holding[tkn.retrans_req[i] % HOLDING_SIZE], 
 						sizeof(packet), 0, (struct sockaddr *)&send_addr,
 						sizeof(send_addr));
@@ -419,19 +422,25 @@ int main(int argc, char **argv)
 					}
 				}
 			}
+			printf("\nAdded missing packets to the retrans array\n");
 
 			/*Check if you have sent all of your packets*/
 			if(sent_packets < num_packets) {
 
 				/*Update your frame so that it is filled and has no packets
 				 * which have been received by all processes*/
+				printf("\nGonna fill that frame\n");
+				printf("\nAll have: %d\n", all_have);
 				i = last_all_have;
 				while(i <= all_have) {
+					printf("\nFilling: %d\n", i);
 					frame[i % FRAME_SIZE]->random_number = rand();
 					frame[i % FRAME_SIZE]->type = 0;
+					printf("\nGot here\n");
 					frame[i % FRAME_SIZE]->machine_index = machine_index;
 					frame[i % FRAME_SIZE]->packet_index = tkn.sequence++;
 					sent_packets++;
+					i++;
 				}
 
 			}else{
@@ -452,6 +461,8 @@ int main(int argc, char **argv)
 					}
 				}
 			}
+
+			printf("\nRe-filled frame\n");
 
 			/*Multicast all packets in your frame*/
 			for(i = 0; i < FRAME_SIZE; i++) {

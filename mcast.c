@@ -24,6 +24,7 @@
 void recv_dbg_init(int percent, int machine_index);
 void final_report();
 void write_packet(packet *p);
+int minimum(int a, int b);
 
 struct sockaddr_in name;
 struct sockaddr_in send_addr;
@@ -80,6 +81,8 @@ packet             *frame[FRAME_SIZE];
 FILE               *file;
 int                highest_received = 0;
 int                num_finished = 0;
+int                all_have = -1; /*Index which all machines have received*/
+int                last_all_have = -1; /*The value of the last all_have*/
 
 int main(int argc, char **argv)
 {
@@ -227,11 +230,8 @@ int main(int argc, char **argv)
 	/*The first process creates the initial token*/
     if(machine_index == 1) {
         for(i = 0; i < RETRANS_SIZE; i++) {
-            tkn.retrans_req[i] = -1; /*??*/
+            tkn.retrans_req[i] = -1;
 		}
-		/*for(i = 0; i < tkn->is_finished; i++) {
-            tkn->is_finished[i] = 0;
-		}*/
         tkn.type = 1;
 		tkn.sequence = 0;
 		tkn.aru = 0;
@@ -382,26 +382,33 @@ int main(int argc, char **argv)
 				}
 			}	
 
+			/*Evaluate the index received by all machines from the token*/
+			last_all_have = all_have;
+			all_have = minimum(tkn.aru, last_seen_aru);
+			printf("\nEvaluated minimum as: %d\n", all_have);
+
 
 			/*Logic for updating the token*/
-			if((tkn.aru > local_aru) || (machine_index == tkn.last_lowered)) {
+			if((tkn.aru > local_aru)||(machine_index == tkn.last_lowered)) {
 				tkn.aru = local_aru;
 				tkn.last_lowered = machine_index;
 			}
+			printf("\nUpdated the token\n");
 
 			/*If you have any packets in the retrans in your 
 			 * packet holding array, send them*/
-			/*for(i = 0; i < RETRANS_SIZE; i++) {
+			for(i = 0; i < RETRANS_SIZE; i++) {
 				if(holding[tkn.retrans_req[i] % HOLDING_SIZE]->packet_index == tkn.retrans_req[i]) {
 					sendto(ss, holding[tkn.retrans_req[i] % HOLDING_SIZE], 
 						sizeof(packet), 0, (struct sockaddr *)&send_addr,
 						sizeof(send_addr));
 				}
-			}*/
+			}
+			printf("\nChecked the retrans array\n");
 
 			/*Add missing packets to the rtr array in the token*/
 			int temp = local_aru; /*the index last added to retrans*/
-			/*for(i = 0; i < RETRANS_SIZE; i++) {
+			for(i = 0; i < RETRANS_SIZE; i++) {
 				if(tkn.retrans_req[i] == -1) {
 					for(int j = temp; j < highest_received; j++) {
 						if(holding[j%HOLDING_SIZE]->packet_index < local_aru) {
@@ -411,22 +418,25 @@ int main(int argc, char **argv)
 						}
 					}
 				}
-			}*/
-
-
+			}
 
 			/*Check if you have sent all of your packets*/
 			if(sent_packets < num_packets) {
 
 				/*Update your frame so that it is filled and has no packets
 				 * which have been received by all processes*/
-				/*frame[i]->random_number = srand();*/
-				/*frame[i]->type = 0 ????*/
-				/*frame[i]->machine_index = machine_index;*/
-				/*frame[i]->packet_index = sent_packets++*/
-				/*^^^Need to account for other processes*/
+				i = last_all_have;
+				while(i <= all_have) {
+					frame[i % FRAME_SIZE]->random_number = rand();
+					frame[i % FRAME_SIZE]->type = 0;
+					frame[i % FRAME_SIZE]->machine_index = machine_index;
+					frame[i % FRAME_SIZE]->packet_index = tkn.sequence++;
+					sent_packets++;
+				}
+
 			}else{
-				if((local_aru == tkn.sequence) && (tkn.sequence == tkn.aru)) {
+				if((local_aru == tkn.sequence) && (tkn.sequence == tkn.aru) 
+				&& (sent_packets == num_packets)){
 					/*Finishing logic*/
 
 					/*Set up machine_finished packet and multicast it*/
@@ -444,23 +454,19 @@ int main(int argc, char **argv)
 			}
 
 			/*Multicast all packets in your frame*/
-			/*for(i = 0; i < FRAME_SIZE; i++) {
+			for(i = 0; i < FRAME_SIZE; i++) {
 				
 				/*Multicast the packet*/
-			/*	sendto(ss, frame[i], sizeof(packet),0,(struct sockaddr *)&send_addr, sizeof(send_addr));
+				sendto(ss, frame[i], sizeof(packet),0,(struct sockaddr *)&send_addr, sizeof(send_addr));
 
 				/*Update token -- is the first if right???*/
-			/*	if((tkn.aru == tkn.sequence) && (local_aru == tkn.aru)) {
+				if((tkn.aru == tkn.sequence) && (local_aru == tkn.aru)) {
 					tkn.aru++;
 				}
-				if(frame[i]->packet_index > tkn.sequence) {
-					tkn.sequence = frame[i]->packet_index;
-				}
-
 			}
 
 			/*Set the last seen ARU*/
-			/*last_seen_aru = tkn.aru;
+			last_seen_aru = tkn.aru;
 
 			/*Send the token to the neighbor processes*/
 			sendto(ss, &tkn, sizeof(token), 0, (struct sockaddr *)&neighbor, sizeof(neighbor));
@@ -602,4 +608,12 @@ void final_report() {
 void write_packet(packet *p) {
 	fprintf(file, "%2d, %8d , %8d\n", p->machine_index, p->packet_index, 
 		p->random_number);
+}
+
+int minimum(int a, int b) {
+	if(a < b) {
+		return a;
+	}else{
+		return b;
+	}
 }

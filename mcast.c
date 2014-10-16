@@ -446,6 +446,19 @@ int main(int argc, char **argv)
 					i++;
 				}*/
 
+				/** NEW FILL CODE **/
+				int temp = last_all_have;
+				while(frame[temp+1]->packet_index <= all_have) {
+					printf("\nFilling: %d\n", i);
+					frame[i % FRAME_SIZE]->random_number = rand();
+					frame[i % FRAME_SIZE]->type = 0;
+					printf("\nGot here\n");
+					frame[i % FRAME_SIZE]->machine_index = machine_index;
+					frame[i % FRAME_SIZE]->packet_index = tkn.sequence++;
+					sent_packets++;
+					temp++;
+				}
+
 			}else{
 				if((local_aru == tkn.sequence) && (tkn.sequence == tkn.aru) 
 				&& (sent_packets == num_packets)){

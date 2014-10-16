@@ -128,6 +128,7 @@ int main(int argc, char **argv)
     buffer = malloc(PACKET_SIZE);
 	for(i = 0; i < FRAME_SIZE; i++) {
 		frame[i] = malloc(sizeof(packet));
+        frame[i]->packet_index = -1;
 	}
 	for(i = 0; i < HOLDING_SIZE; i++) {
 		holding[i] = malloc(sizeof(packet));
@@ -434,29 +435,27 @@ int main(int argc, char **argv)
 				printf("\nGonna fill that frame\n");
 				printf("\nAll have: %d\n", all_have);
 				/** OLD FILL CODE **/
-				/*i = last_all_have;
-				while(i <= all_have) {
-					printf("\nFilling: %d\n", i);
-					frame[i % FRAME_SIZE]->random_number = rand();
-					frame[i % FRAME_SIZE]->type = 0;
-					printf("\nGot here\n");
-					frame[i % FRAME_SIZE]->machine_index = machine_index;
-					frame[i % FRAME_SIZE]->packet_index = tkn.sequence++;
-					sent_packets++;
-					i++;
-				}*/
 
 				/** NEW FILL CODE **/
-				int temp = last_all_have;
-				while(frame[temp+1]->packet_index <= all_have) {
-					printf("\nFilling: %d\n", i);
-					frame[i % FRAME_SIZE]->random_number = rand();
-					frame[i % FRAME_SIZE]->type = 0;
+				int temp = last_all_have + 1;
+				while(frame[temp % FRAME_SIZE]->packet_index <= all_have) {
+                    for(int i = 0; i < FRAME_SIZE; i++) {
+                        printf("\nbefore all index: %d, value: %d\n", i, frame[i]->packet_index);
+                    }
+                    printf("\ntemp: %d  index: %d  all_have: %d\n", temp, frame[temp]->packet_index, all_have);
+					printf("\nFilling: %d\n", temp);
+					frame[temp % FRAME_SIZE]->random_number = rand();
+					frame[temp % FRAME_SIZE]->type = 0;
 					printf("\nGot here\n");
-					frame[i % FRAME_SIZE]->machine_index = machine_index;
-					frame[i % FRAME_SIZE]->packet_index = tkn.sequence++;
+					frame[temp % FRAME_SIZE]->machine_index = machine_index;
+					frame[temp % FRAME_SIZE]->packet_index = tkn.sequence;
+                    tkn.sequence++;
 					sent_packets++;
 					temp++;
+
+                    for(int i = 0; i < FRAME_SIZE; i++) {
+                        printf("\nindex: %d, value: %d\n", i, frame[i]->packet_index);
+                    }
 				}
 
 			}else{
@@ -480,24 +479,29 @@ int main(int argc, char **argv)
 
 			printf("\nRe-filled frame\n");
 
+            /*fix this only send new ones*/
 			/*Multicast all packets in your frame*/
 			for(i = 0; i < FRAME_SIZE; i++) {
 				
 				/*Multicast the packet*/
-				sendto(ss, frame[i], sizeof(packet),0,(struct sockaddr *)&send_addr, sizeof(send_addr));
+				bytes = sendto(ss, frame[i], sizeof(packet),0,(struct sockaddr *)&send_addr, sizeof(send_addr));
 
+                printf("\nsent index:%d machine_num:%d bytes:%d\n", frame[i]->packet_index, frame[i]->machine_index, bytes);
 				/*Update token -- is the first if right???*/
 				if((tkn.aru == tkn.sequence) && (local_aru == tkn.aru)) {
 					tkn.aru++;
 				}
 			}
 
+			printf("\nsent my frame\n");
 			/*Set the last seen ARU*/
 			last_seen_aru = tkn.aru;
 
 			/*Send the token to the neighbor processes*/
-			sendto(ss, &tkn, sizeof(token), 0, (struct sockaddr *)&neighbor, sizeof(neighbor));
+			bytes = sendto(ss, &tkn, sizeof(token), 0, (struct sockaddr *)&neighbor, sizeof(neighbor));
 			has_token = 0;
+
+			printf("\nsent the token after connected it's connected: %d. My neighbor is: %s\n", bytes, inet_ntoa(neighbor.sin_addr));
 
 
         /**********************
@@ -533,6 +537,8 @@ int main(int argc, char **argv)
                 bytes = recv_dbg( sr, (char *) buffer, PACKET_SIZE, 0 );
                 packet_type = buffer->type;
 
+                printf("\nGot packet type: %d, index: %d\n", packet_type, buffer->machine_index);
+
                 /** Received packet **/
                 if (packet_type == 0) {
 
@@ -547,20 +553,21 @@ int main(int argc, char **argv)
 
                     /** First packet in holding array edge case, write 
 					 * and update **/
-                    if (local_aru == -1 && frame[0]->packet_index != -1) {
+                    if (local_aru == -1 && holding[0]->packet_index != -1) {
                         local_aru++;
-						write_packet(frame[0]);
+						write_packet(holding[0]);
                         
                     }
 
                     /** Write all packets you can**/
-                    while (frame[local_aru % FRAME_SIZE] <= frame[(local_aru+1) % FRAME_SIZE]) {
-						write_packet(frame[local_aru % FRAME_SIZE + 1]);
-                        local_aru = frame[(local_aru) % FRAME_SIZE]->packet_index;
-                    }
+                    /*while (holding[local_aru % HOLDING_SIZE]->packet_index < holding[(local_aru+1) % HOLDING_SIZE]->packet_index) {
+						write_packet(holding[local_aru % HOLDING_SIZE]);
+                        local_aru = holding[(local_aru) % HOLDING_SIZE]->packet_index;
+                    }*/
                 
 				/** Received token **/
                 } else if (packet_type == 1) {
+                    printf("\nI got the token\n");
 					tkn = *((token *)buffer);
 					if(!tkn.is_connected) {
 						printf("\nI sent the token! From main loop\n");

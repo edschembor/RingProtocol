@@ -239,6 +239,7 @@ int main(int argc, char **argv)
 		tkn.sequence = 0;
 		tkn.aru = -1;
         has_token = 1;
+		tkn.round = 1;
         if (clock_gettime(USED_CLOCK, &begin)) {
             /* Getting clock time failed */
             exit(EXIT_FAILURE);
@@ -336,6 +337,12 @@ int main(int argc, char **argv)
 	if(has_token) {
 		printf("\n---------------------I have the token------------------\n");
         tkn.is_connected = 1;
+ 		sendto( ss, &tkn, sizeof(token), 0, 
+			(struct sockaddr *)&neighbor, sizeof(neighbor) );
+		has_token = 0;
+		printf("\n\n------------token: %d----------------------\n\n", tkn.is_connected);
+
+
 	}
 
 
@@ -351,22 +358,32 @@ int main(int argc, char **argv)
 		temp_mask = mask;
 		num = select(FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask,
 			&timeout);
+		//printf("\nSelected\n");
 		if(num > 0) {
 			bytes = recv_dbg(sr, (char *) buffer, PACKET_SIZE, 0);
 			packet_type = buffer->type;
-			
+			//printf("\nReceived\n");
+
+			/** We receive a token**/
 			if(packet_type == 1) {
 				tkn = *((token *)buffer);
-				if (local_round < tkn.round && tkn.is_connected) {
+				//printf("\nlocal round: %d\n", local_round);
+				printf("\ntkn round: %d\n", tkn.round);
+				printf("\ntkn is connected %d\n", tkn.is_connected);
+				if (local_round < tkn.round /*&& tkn.is_connected*/) {
 					if((all_have == tkn.sequence) && (tkn.sequence == last_seq)) {
 						all_machines_finished->type = 3;
 						sendto(ss, all_machines_finished, sizeof(packet), 0,
 						(struct sockaddr *)&send_addr, sizeof(send_addr));
 						break;
 					}
+					printf("\nPre-retrans\n");
 					retransmit();
+					printf("\nRetransmitted\n");
 					fill_retrans();
+					printf("\nFilled retrans\n");
 					fill_frame();
+					printf("\nFilled frame\n");
 					if (local_aru < tkn.aru || machine_index == tkn.last_lowered) {
 						tkn.aru = local_aru;
 						tkn.last_lowered = machine_index;
@@ -379,12 +396,17 @@ int main(int argc, char **argv)
 				}
 				sendto(ss, &tkn, sizeof(token), 0, 
 					(struct sockaddr *)&neighbor, sizeof(neighbor));
+				has_token = 0;
+				//printf("\nSent token\n");
+
+			/** If we receive a data packet **/		
 			} else if (packet_type == 0) {
 				
 				/** If the packet's index > local ARU, add to holding 
 				 * array **/
 				if ((buffer->packet_index > local_aru) && !(buffer->packet_index > FRAME_SIZE+local_aru)) {
 					holding[buffer->packet_index % FRAME_SIZE] = buffer;
+					printf("\nGot packet w/ index: %d\n", buffer->packet_index);
 					if(buffer->packet_index > highest_received) {
 						highest_received = buffer->packet_index;
 					}
@@ -404,13 +426,15 @@ int main(int argc, char **argv)
 					local_aru++;
 				}
 
+			/** If we receive a termination packet **/
 			} else if (packet_type == 3) {
 				all_machines_finished->type = 3;
 				sendto(ss, all_machines_finished, sizeof(packet), 0,
 					(struct sockaddr *)&send_addr, sizeof(send_addr));
 				break;
 			} else {
-				printf("\nerror :(\n");
+				printf("\npacket_type: %d\n", packet_type);
+				printf("\nerror :( or other ip\n");
 			}
 		}
 	}
@@ -457,11 +481,13 @@ int minimum(int a, int b) {
 void retransmit() {
 	packet *temp_packet;
 	for(int i = 0; i < RETRANS_SIZE; i++) {
-		temp_packet = holding[tkn.retrans_req[i] % HOLDING_SIZE];
-		if (tkn.retrans_req[i] == temp_packet->packet_index){
-			sendto(ss, temp_packet, sizeof(packet), 0, 
-				(struct sockaddr *)&send_addr, sizeof(send_addr));
-			tkn.retrans_req[i] = -1;
+		if(tkn.retrans_req[i] != -1) {
+			temp_packet = holding[tkn.retrans_req[i] % HOLDING_SIZE];
+			if (tkn.retrans_req[i] == temp_packet->packet_index){
+				sendto(ss, temp_packet, sizeof(packet), 0, 
+					(struct sockaddr *)&send_addr, sizeof(send_addr));
+				tkn.retrans_req[i] = -1;
+			}
 		}
 	}
 }
@@ -483,12 +509,12 @@ void fill_retrans() {
 
 void fill_frame() {
 	int temp = last_all_have + 1;
+	printf("\ntemp: %d  index: %d  all_have: %d\n", temp, frame[temp]->packet_index, all_have);
 	while(frame[temp % FRAME_SIZE]->packet_index <= all_have) {
 		printf("\ntemp: %d  index: %d  all_have: %d\n", temp, frame[temp]->packet_index, all_have);
 		printf("\nFilling: %d\n", temp);
 		frame[temp % FRAME_SIZE]->random_number = rand();
 		frame[temp % FRAME_SIZE]->type = 0;
-		printf("\nGot here\n");
 		frame[temp % FRAME_SIZE]->machine_index = machine_index;
 		frame[temp % FRAME_SIZE]->packet_index = tkn.sequence++;
 		sent_packets++;

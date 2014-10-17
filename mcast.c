@@ -410,7 +410,7 @@ int main(int argc, char **argv)
 				/** If the packet's index > local ARU, add to holding 
 				 * array **/
 				if ((buffer->packet_index > local_aru) && !(buffer->packet_index > FRAME_SIZE+local_aru)) {
-					holding[buffer->packet_index % FRAME_SIZE] = buffer;
+					*holding[buffer->packet_index % FRAME_SIZE] = *buffer;
 					printf("\nGot packet w/ index: %d\n", buffer->packet_index);
 					if(buffer->packet_index > highest_received) {
 						highest_received = buffer->packet_index;
@@ -421,8 +421,7 @@ int main(int argc, char **argv)
 				 * and update **/
 				if (local_aru == -1 && holding[0]->packet_index != -1) {
 					local_aru++;
-					write_packet(holding[0]);
-					
+					write_packet(holding[0]);	
 				}
 
 				/** Write all packets you can **/
@@ -432,7 +431,7 @@ int main(int argc, char **argv)
 				}
 				printf("\nLocal ARU: %d\n", local_aru);
 				while(holding[local_aru+1 % HOLDING_SIZE]->packet_index == local_aru+1) {
-					write_packet(holding[local_aru % HOLDING_SIZE]);
+					/*write_packet(holding[local_aru % HOLDING_SIZE]);*/
 					printf("\nwrote: %d\n" ,holding[local_aru % HOLDING_SIZE]->packet_index);
 					local_aru++;
 				}

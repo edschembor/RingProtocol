@@ -15,7 +15,7 @@
 #include <sys/time.h>
 #include <time.h>
 
-#define HOLDING_SIZE 100
+#define HOLDING_SIZE 500
 #define FRAME_SIZE 250
 #define NAME_LENGTH 80
 
@@ -368,8 +368,8 @@ int main(int argc, char **argv)
 			if(packet_type == 1) {
 				tkn = *((token *)buffer);
 				//printf("\nlocal round: %d\n", local_round);
-				printf("\ntkn round: %d\n", tkn.round);
-				printf("\ntkn is connected %d\n", tkn.is_connected);
+				//printf("\ntkn round: %d\n", tkn.round);
+				//printf("\ntkn is connected %d\n", tkn.is_connected);
 				if (local_round < tkn.round /*&& tkn.is_connected*/) {
 					if((all_have == tkn.sequence) && (tkn.sequence == last_seq)) {
 						all_machines_finished->type = 3;
@@ -377,31 +377,36 @@ int main(int argc, char **argv)
 						(struct sockaddr *)&send_addr, sizeof(send_addr));
 						break;
 					}
-					printf("\nPre-retrans\n");
+					//printf("\nPre-retrans\n");
 					retransmit();
-					printf("\nRetransmitted\n");
+					//printf("\nRetransmitted\n");
 					fill_retrans();
-					printf("\nFilled retrans\n");
+					//printf("\nFilled retrans\n");
 					fill_frame();
-					printf("\nFilled frame\n");
+					//printf("\nFilled frame\n");
 					if (local_aru < tkn.aru || machine_index == tkn.last_lowered) {
 						tkn.aru = local_aru;
 						tkn.last_lowered = machine_index;
 					}
-					if (machine_index == 1) {
-						tkn.round++;
-					}
 					local_round++;
 					last_seq = tkn.sequence;
+				}else if (local_round == tkn.round) {
+					tkn.round++;
 				}
+				
+				/** Calculate all received values **/
+				last_all_have = all_have;
+				all_have = minimum(tkn.aru, last_seen_aru);
+				last_seen_aru = tkn.aru;
 				sendto(ss, &tkn, sizeof(token), 0, 
 					(struct sockaddr *)&neighbor, sizeof(neighbor));
 				has_token = 0;
-				//printf("\nSent token\n");
 
 			/** If we receive a data packet **/		
 			} else if (packet_type == 0) {
-				
+			
+				printf("\nGot: %d\n", buffer->packet_index);
+
 				/** If the packet's index > local ARU, add to holding 
 				 * array **/
 				if ((buffer->packet_index > local_aru) && !(buffer->packet_index > FRAME_SIZE+local_aru)) {
@@ -421,10 +426,17 @@ int main(int argc, char **argv)
 				}
 
 				/** Write all packets you can **/
-				while(local_aru < holding[(local_aru+1) % HOLDING_SIZE]->packet_index) {
+				printf("\nGoin in\n");
+				for(int i = 0; i < HOLDING_SIZE; i++) {
+					printf("\n%d\n", holding[i]->packet_index);
+				}
+				printf("\nLocal ARU: %d\n", local_aru);
+				while(holding[local_aru+1 % HOLDING_SIZE]->packet_index == local_aru+1) {
 					write_packet(holding[local_aru % HOLDING_SIZE]);
+					printf("\nwrote: %d\n" ,holding[local_aru % HOLDING_SIZE]->packet_index);
 					local_aru++;
 				}
+				printf("\nEscaped\n");
 
 			/** If we receive a termination packet **/
 			} else if (packet_type == 3) {
@@ -511,15 +523,22 @@ void fill_frame() {
 	int temp = last_all_have + 1;
 	printf("\ntemp: %d  index: %d  all_have: %d\n", temp, frame[temp]->packet_index, all_have);
 	while(frame[temp % FRAME_SIZE]->packet_index <= all_have) {
-		printf("\ntemp: %d  index: %d  all_have: %d\n", temp, frame[temp]->packet_index, all_have);
 		printf("\nFilling: %d\n", temp);
+		printf("aru: %d, seq: %d", tkn.aru, tkn.sequence);
 		frame[temp % FRAME_SIZE]->random_number = rand();
 		frame[temp % FRAME_SIZE]->type = 0;
 		frame[temp % FRAME_SIZE]->machine_index = machine_index;
-		frame[temp % FRAME_SIZE]->packet_index = tkn.sequence++;
-		sent_packets++;
-		temp++;
-		sendto(ss, machine_finished, sizeof(packet), 0,
+		frame[temp % FRAME_SIZE]->packet_index = tkn.sequence;
+		if(tkn.aru == -1) {
+			tkn.aru++;
+		}
+		if(tkn.aru == tkn.sequence) {
+			tkn.aru++;
+			tkn.sequence++;
+		}
+		sendto(ss, frame[temp % FRAME_SIZE], sizeof(packet), 0,
 			(struct sockaddr *)&send_addr, sizeof(send_addr));
+		temp++;
+		sent_packets++;
 	}
 }

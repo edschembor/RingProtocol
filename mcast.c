@@ -426,7 +426,7 @@ int main(int argc, char **argv)
 				}
 
 				/** Write all packets you can **/
-				printf("\nGoin in\n");
+				printf("\nWriting loop begins\n");
 				for(int i = 0; i < HOLDING_SIZE; i++) {
 					printf("\n%d\n", holding[i]->packet_index);
 				}

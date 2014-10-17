@@ -1,6 +1,6 @@
 CC=gcc
 
-CFLAGS = -c -Wall -pedantic -D_GNU_SOURCE -std=c99
+CFLAGS = -c -g -Wall -pedantic -D_GNU_SOURCE -std=c99
 
 all: start_mcast mcast
 

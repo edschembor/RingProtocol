@@ -15,8 +15,8 @@
 #include <sys/time.h>
 #include <time.h>
 
-#define HOLDING_SIZE 750
-#define FRAME_SIZE 250
+#define HOLDING_SIZE 15
+#define FRAME_SIZE 5
 #define NAME_LENGTH 80
 
 #define USED_CLOCK CLOCK_MONOTONIC /* CLOCK_MONOTONIC_RAW if available*/
@@ -241,7 +241,7 @@ int main(int argc, char **argv)
 		tkn.sequence = -1;
 		tkn.aru = -1;
         has_token = 1;
-		tkn.round = 0;
+		tkn.round = 1;
         if (clock_gettime(USED_CLOCK, &begin)) {
             /* Getting clock time failed */
             exit(EXIT_FAILURE);
@@ -359,6 +359,7 @@ int main(int argc, char **argv)
 
 		temp_mask = mask;
 		/*Check if process 2 timed out, which means the token was lost*/
+#if 0
 		if(machine_index == 2) {
             if (clock_gettime(USED_CLOCK, &current)) {
                 /* getting clock time failed, what now? */
@@ -377,7 +378,7 @@ int main(int argc, char **argv)
 					(struct sockaddr *)&neighbor, sizeof(neighbor));
 			}
 		}
-
+#endif
 
 		num = select(FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask,
 			&timeout);
@@ -394,7 +395,10 @@ int main(int argc, char **argv)
 				printf("\nlocal round: %d\n", local_round);
 				printf("\ntkn round: %d\n", tkn.round);
 				printf("\ntkn is connected %d\n", tkn.is_connected);
-				if (local_round < tkn.round /*&& tkn.is_connected*/) {
+                if ((local_round == tkn.round)&&(machine_index == 2)) {
+                    tkn.round++;
+                }
+				if (local_round < tkn.round && tkn.is_connected) {
 					
 					retransmit();
 					fill_retrans();
@@ -426,8 +430,6 @@ int main(int argc, char **argv)
 
 					local_round++;
 					last_seq = tkn.sequence;
-				}else if ((local_round == tkn.round)&&(machine_index == 2)) {
-					tkn.round++;
 				}
 				
 				sendto(ss, &tkn, sizeof(token), 0, 
@@ -572,6 +574,11 @@ void fill_frame() {
 		frame[temp % FRAME_SIZE]->packet_index = tkn.sequence;
 		sendto(ss, frame[temp % FRAME_SIZE], sizeof(packet), 0,
 			(struct sockaddr *)&send_addr, sizeof(send_addr));
+/*		holding[temp % HOLDING_SIZE]->random_number = rand();
+		holding[temp % HOLDING_SIZE]->type = 0;
+		holding[temp % HOLDING_SIZE]->machine_index = machine_index;
+		holding[temp % HOLDING_SIZE]->packet_index = tkn.sequence;
+*/
 		temp++;
 		sent_packets++;
 	}

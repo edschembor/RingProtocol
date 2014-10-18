@@ -15,7 +15,7 @@
 #include <sys/time.h>
 #include <time.h>
 
-#define HOLDING_SIZE 150
+#define HOLDING_SIZE 250
 #define FRAME_SIZE 50
 #define NAME_LENGTH 80
 
@@ -72,6 +72,7 @@ int                num_machines;
 int                loss_rate;
 
 token              tkn;
+token              tkn_buf;
 ip_packet          *i_packet;
 packet             *buffer;
 packet             *machine_finished; /*Tells other machines this is done*/
@@ -354,6 +355,13 @@ int main(int argc, char **argv)
  * ************************    
  * ***********************/
 	
+    if (machine_index == 2) {
+        if (clock_gettime(USED_CLOCK, &begin)) {
+            /* Getting clock time failed */
+            exit(EXIT_FAILURE);
+        }
+        startt = begin.tv_sec*NANOS + begin.tv_nsec;
+    }
 
 	for(;;) {
 
@@ -366,7 +374,7 @@ int main(int argc, char **argv)
             }
             elapsed = current.tv_sec*NANOS + current.tv_nsec - startt;
             microseconds = elapsed / 1000 + (elapsed % 1000 >= 500); /* round up halves*/
-			if(microseconds > 1000000000) {
+			if(microseconds > 1000000) {
                 if (clock_gettime(USED_CLOCK, &begin)) {
                     /* Oops, getting clock time failed */
                     exit(EXIT_FAILURE);
@@ -377,8 +385,7 @@ int main(int argc, char **argv)
 					(struct sockaddr *)&neighbor, sizeof(neighbor));
 			}
 		}
-
-		num = select(FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask,
+        num = select(FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask,
 			&timeout);
 		//printf("\nSelected\n");
 		if(num > 0) {
@@ -389,15 +396,15 @@ int main(int argc, char **argv)
 			/** We receive a token**/
 			if(packet_type == 1) {
 				printf("\nGOT TOKEN\n");
-				tkn = *((token *)buffer);
+				tkn_buf = *((token *)buffer);
 				printf("\nlocal round: %d\n", local_round);
 				printf("\ntkn round: %d\n", tkn.round);
 				printf("\ntkn is connected %d\n", tkn.is_connected);
-                if ((local_round == tkn.round)&&(machine_index == 2)) {
-                    tkn.round++;
+                if ((local_round == tkn_buf.round)&&(machine_index == 2)) {
+                    tkn_buf.round++;
                 }
-				if (local_round < tkn.round && tkn.is_connected) {
-					
+				if (local_round < tkn_buf.round /*&& tkn_buf.is_connected*/) {
+					tkn = tkn_buf;
 					retransmit();
 					fill_retrans();
 					fill_frame();

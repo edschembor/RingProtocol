@@ -15,8 +15,8 @@
 #include <sys/time.h>
 #include <time.h>
 
-#define HOLDING_SIZE 250
-#define FRAME_SIZE 50
+#define HOLDING_SIZE 1500
+#define FRAME_SIZE 1500
 #define NAME_LENGTH 80
 
 #define USED_CLOCK CLOCK_MONOTONIC /* CLOCK_MONOTONIC_RAW if available*/
@@ -424,7 +424,7 @@ int main(int argc, char **argv)
 				
 				sendto(ss, &tkn, sizeof(token), 0, 
 					(struct sockaddr *)&neighbor, sizeof(neighbor));
-				printf("\nSent token\n");
+				/*printf("\nSent token\n");
 				printf("\n");
 				for (int i = 0; i < HOLDING_SIZE; i++) {
 					printf("%d, ", holding[i]->packet_index);
@@ -435,7 +435,7 @@ int main(int argc, char **argv)
 				for (int i = 0; i < FRAME_SIZE; i++) {
 					printf("%d, ", frame[i]->packet_index);
 				}
-				printf("\n");
+				printf("\n");*/
 			/** If we receive a data packet **/		
 			} else if (packet_type == 0) {
 			
@@ -589,10 +589,10 @@ void fill_retrans() {
     printf(" ]\n");
 }
 
-void fill_frame() {
+/*void fill_frame() {
 	int temp = last_all_have + 1;
 	printf("\ntemp: %d  index: %d  all_have: %d\n", temp, frame[temp % FRAME_SIZE]->packet_index, all_have);
-	while((frame[temp % FRAME_SIZE]->packet_index <= all_have) && (sent_packets < num_packets)) {
+	while((frame[temp % FRAME_SIZE]->packet_index <= all_have) && (sent_packets < num_packets) && (temp%FRAME_SIZE == tkn.sequence%FRAME_SIZE)) {
 		printf("\nFilling: %d\n", temp);
 		printf("aru: %d, seq: %d", tkn.aru, tkn.sequence);
 		frame[temp % FRAME_SIZE]->random_number = rand();
@@ -605,12 +605,32 @@ void fill_frame() {
 		frame[temp % FRAME_SIZE]->packet_index = tkn.sequence;
 		sendto(ss, frame[temp % FRAME_SIZE], sizeof(packet), 0,
 			(struct sockaddr *)&send_addr, sizeof(send_addr));
-/*		holding[temp % HOLDING_SIZE]->random_number = rand();
-		holding[temp % HOLDING_SIZE]->type = 0;
-		holding[temp % HOLDING_SIZE]->machine_index = machine_index;
-		holding[temp % HOLDING_SIZE]->packet_index = tkn.sequence;
-*/
 		temp++;
 		sent_packets++;
 	}
+}*/
+
+
+void fill_frame() {
+	int temp = ((tkn.sequence+1) % FRAME_SIZE);
+	while((frame[temp]->packet_index <= all_have) && (sent_packets < num_packets)) {
+		
+		/*Fill this spot with a new packet*/
+		frame[temp]->random_number = rand();
+		frame[temp]->type = 0;
+		frame[temp]->machine_index = machine_index;
+		if(tkn.aru == tkn.sequence) {
+			tkn.aru++;
+		}
+		tkn.sequence++;
+		frame[temp]->packet_index = tkn.sequence;
+		sendto(ss, frame[temp], sizeof(packet), 0,
+			(struct sockaddr *)&send_addr, sizeof(send_addr));
+		
+		/*Increment temp and sent packets*/
+		temp = (temp+1) % FRAME_SIZE;
+		sent_packets++;
+	}
+
+
 }

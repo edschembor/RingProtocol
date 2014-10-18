@@ -277,7 +277,7 @@ int main(int argc, char **argv)
             }
             elapsed = current.tv_sec*NANOS + current.tv_nsec - startt;
             microseconds = elapsed / 1000 + (elapsed % 1000 >= 500); /* round up halves*/
-			if(microseconds > 100000) {
+			if(microseconds > 10000) {
 				has_token = 1;
                 if (clock_gettime(USED_CLOCK, &begin)) {
                     /* Oops, getting clock time failed */
@@ -355,36 +355,13 @@ int main(int argc, char **argv)
  * ************************    
  * ***********************/
 	
-    if (machine_index == 2) {
-        if (clock_gettime(USED_CLOCK, &begin)) {
-            /* Getting clock time failed */
-            exit(EXIT_FAILURE);
-        }
-        startt = begin.tv_sec*NANOS + begin.tv_nsec;
-    }
+
 
 	for(;;) {
 
 		temp_mask = mask;
 		/*Check if process 2 timed out, which means the token was lost*/
-		if(machine_index == 2) {
-            if (clock_gettime(USED_CLOCK, &current)) {
-                /* getting clock time failed, what now? */
-                exit(EXIT_FAILURE);
-            }
-            elapsed = current.tv_sec*NANOS + current.tv_nsec - startt;
-            microseconds = elapsed / 1000 + (elapsed % 1000 >= 500); /* round up halves*/
-			if(microseconds > 1000000) {
-                if (clock_gettime(USED_CLOCK, &begin)) {
-                    /* Oops, getting clock time failed */
-                    exit(EXIT_FAILURE);
-                }
-                startt = begin.tv_sec*NANOS + begin.tv_nsec;
-				printf("\nPROCESS 2 TIMED OUT*************\n");
-				sendto(ss, &tkn, sizeof(token), 0, 
-					(struct sockaddr *)&neighbor, sizeof(neighbor));
-			}
-		}
+
         num = select(FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask,
 			&timeout);
 		//printf("\nSelected\n");
@@ -398,12 +375,19 @@ int main(int argc, char **argv)
 				printf("\nGOT TOKEN\n");
 				tkn_buf = *((token *)buffer);
 				printf("\nlocal round: %d\n", local_round);
-				printf("\ntkn round: %d\n", tkn.round);
-				printf("\ntkn is connected %d\n", tkn.is_connected);
+				printf("\ntkn_buf.round: %d\n", tkn_buf.round);
+				printf("\ntkn_buf is connected %d\n", tkn_buf.is_connected);
                 if ((local_round == tkn_buf.round)&&(machine_index == 2)) {
                     tkn_buf.round++;
                 }
-				if (local_round < tkn_buf.round /*&& tkn_buf.is_connected*/) {
+				if (local_round < tkn_buf.round && tkn_buf.is_connected) {
+                    if (machine_index == 2) {
+                        if (clock_gettime(USED_CLOCK, &begin)) {
+                            /* Getting clock time failed */
+                            exit(EXIT_FAILURE);
+                        }
+                        startt = begin.tv_sec*NANOS + begin.tv_nsec;
+                    }
 					tkn = tkn_buf;
 					retransmit();
 					fill_retrans();
@@ -413,19 +397,20 @@ int main(int argc, char **argv)
 					printf("\n--all_have: %d\n", all_have);
 					printf("\n--tknsq: %d\n", tkn.sequence);
 					printf("\n--last seq: %d\n", last_seq);
-					if((all_have == tkn.sequence) && (tkn.sequence == last_seq)) {
-						all_machines_finished->type = 3;
-						sendto(ss, all_machines_finished, sizeof(packet), 0,
-						(struct sockaddr *)&send_addr, sizeof(send_addr));
-						break;
-					}
 
-					printf("\nLast lowered: %d\n", tkn.last_lowered);
+					//printf("\nLast lowered: %d\n", tkn.last_lowered);
 
 					if (local_aru < tkn.aru || machine_index == tkn.last_lowered) {
 						tkn.aru = local_aru;
 						tkn.last_lowered = machine_index;
-						printf("\n---------Lowered aru------------------\n");
+					//	printf("\n---------Lowered aru------------------\n");
+					}
+
+					if((all_have == tkn.sequence) && (tkn.sequence == last_seq) && (sent_packets == num_packets)) {
+						all_machines_finished->type = 3;
+						sendto(ss, all_machines_finished, sizeof(packet), 0,
+						(struct sockaddr *)&send_addr, sizeof(send_addr));
+						break;
 					}
 
 					/** Calculate values **/
@@ -460,7 +445,7 @@ int main(int argc, char **argv)
 				 * array **/
 				if ((buffer->packet_index > local_aru) && (buffer->packet_index <= HOLDING_SIZE+local_aru)) {
 					*holding[buffer->packet_index % HOLDING_SIZE] = *buffer;
-					printf("\nGot packet w/ index: %d\n", buffer->packet_index);
+					//printf("\nGot packet w/ index: %d\n", buffer->packet_index);
 					if(buffer->packet_index > highest_received) {
 						highest_received = buffer->packet_index;
 					}
@@ -474,12 +459,12 @@ int main(int argc, char **argv)
 				}
 
 				/** Write all packets you can **/
-				printf("\nLocal ARU: %d\n", local_aru);
 				while(holding[(local_aru+1) % HOLDING_SIZE]->packet_index == local_aru+1) {
 					write_packet(holding[(local_aru+1) % HOLDING_SIZE]);
 					printf("\nwrote: %d\n" ,holding[(local_aru+1) % HOLDING_SIZE]->packet_index);
 					local_aru++;
 				}
+				printf("\nLocal ARU: %d\n", local_aru);
 				printf("\nEscaped\n");
 
 			/** If we receive a termination packet **/
@@ -491,6 +476,24 @@ int main(int argc, char **argv)
 			} else {
 				printf("\npacket_type: %d\n", packet_type);
 				printf("\nerror :( or other ip\n");
+			}
+		}
+		if(machine_index == 2) {
+            if (clock_gettime(USED_CLOCK, &current)) {
+                /* getting clock time failed, what now? */
+                exit(EXIT_FAILURE);
+            }
+            elapsed = current.tv_sec*NANOS + current.tv_nsec - startt;
+            microseconds = elapsed / 1000 + (elapsed % 1000 >= 500); /* round up halves*/
+			if(microseconds > 1000000) {
+                if (clock_gettime(USED_CLOCK, &begin)) {
+                    /* Oops, getting clock time failed */
+                    exit(EXIT_FAILURE);
+                }
+                startt = begin.tv_sec*NANOS + begin.tv_nsec;
+				printf("\nPROCESS 2 TIMED OUT*************\n");
+				sendto(ss, &tkn, sizeof(token), 0, 
+					(struct sockaddr *)&neighbor, sizeof(neighbor));
 			}
 		}
 	}
@@ -535,25 +538,42 @@ int minimum(int a, int b) {
 }
 
 void retransmit() {
-	packet *temp_packet;
+	packet temp_packet;
 	for(int i = 0; i < RETRANS_SIZE; i++) {
-		if(tkn.retrans_req[i] != -1) {
-			temp_packet = holding[tkn.retrans_req[i] % HOLDING_SIZE];
-			if (tkn.retrans_req[i] == temp_packet->packet_index){
-				sendto(ss, temp_packet, sizeof(packet), 0, 
+
+        /** Retransmit packets from the holding array**/
+        if(tkn.retrans_req[i] != -1) {	
+            temp_packet = *holding[tkn.retrans_req[i] % HOLDING_SIZE];
+			if (tkn.retrans_req[i] == temp_packet.packet_index){
+				sendto(ss, &temp_packet, sizeof(packet), 0, 
 					(struct sockaddr *)&send_addr, sizeof(send_addr));
 				tkn.retrans_req[i] = -1;
+                printf("\nretrans'd index: %d\n", temp_packet.packet_index);
 			}
-		}
+        }
+         
+        /** Retransmit packets from the frame **/
+        if(tkn.retrans_req[i] != -1) {   
+            temp_packet = *frame[tkn.retrans_req[i] % FRAME_SIZE];
+            printf("\ntemp index %d\n", temp_packet.packet_index);
+            if (tkn.retrans_req[i] == temp_packet.packet_index) {
+                sendto(ss, &temp_packet, sizeof(packet), 0, 
+					(struct sockaddr *)&send_addr, sizeof(send_addr));
+				tkn.retrans_req[i] = -1;
+                printf("\nretrans'd index: %d\n", temp_packet.packet_index);
+
+            }
+        }
 	}
 }
 
 void fill_retrans() {
 	int temp = local_aru+1;
+
 	for(i = 0; i < RETRANS_SIZE; i++) {
 		if(tkn.retrans_req[i] == -1) {
-			for(int j = temp; j < highest_received; j++) {
-				if(holding[j%HOLDING_SIZE]->packet_index < local_aru) {
+			for(int j = temp; j <= tkn.sequence; j++) {
+				if(holding[j%HOLDING_SIZE]->packet_index < tkn.sequence) {
 					tkn.retrans_req[i] = j;
 					temp = ++j;
 					break;
@@ -561,6 +581,12 @@ void fill_retrans() {
 			}
 		}
 	}
+
+    printf("\n-----------------------------\nRETRANS\n[ ");
+    for (i = 0; i < RETRANS_SIZE; i++) {
+        printf("%d, ", tkn.retrans_req[i]);
+    }
+    printf(" ]\n");
 }
 
 void fill_frame() {

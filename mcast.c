@@ -15,8 +15,8 @@
 #include <sys/time.h>
 #include <time.h>
 
-#define HOLDING_SIZE 500
-#define FRAME_SIZE 250
+#define HOLDING_SIZE 15
+#define FRAME_SIZE 5
 #define NAME_LENGTH 80
 
 #define USED_CLOCK CLOCK_MONOTONIC /* CLOCK_MONOTONIC_RAW if available*/
@@ -134,8 +134,10 @@ int main(int argc, char **argv)
 	}
 	for(i = 0; i < HOLDING_SIZE; i++) {
 		holding[i] = malloc(sizeof(packet));
+		holding[i]->packet_index = -1;
 	}
 	all_machines_finished = malloc(sizeof(packet));
+
 
 	/*Creates the mcast address*/
     mcast_addr = 225 << 24 | 1 << 16 | 2 << 8 | 103; /* (225.1.2.103) */
@@ -366,27 +368,37 @@ int main(int argc, char **argv)
 
 			/** We receive a token**/
 			if(packet_type == 1) {
+				printf("\nGOT TOKEN\n");
 				tkn = *((token *)buffer);
 				//printf("\nlocal round: %d\n", local_round);
 				//printf("\ntkn round: %d\n", tkn.round);
 				//printf("\ntkn is connected %d\n", tkn.is_connected);
 				if (local_round < tkn.round /*&& tkn.is_connected*/) {
+					
+					retransmit();
+					fill_retrans();
+					fill_frame();
+
 					if((all_have == tkn.sequence) && (tkn.sequence == last_seq)) {
 						all_machines_finished->type = 3;
 						sendto(ss, all_machines_finished, sizeof(packet), 0,
 						(struct sockaddr *)&send_addr, sizeof(send_addr));
 						break;
 					}
-					//printf("\nPre-retrans\n");
-					retransmit();
-					//printf("\nRetransmitted\n");
-					fill_retrans();
-					//printf("\nFilled retrans\n");
-					fill_frame();
-					//printf("\nFilled frame\n");
+
+					if((all_have == tkn.sequence) && (tkn.sequence == last_seq)) {
+						all_machines_finished->type = 3;
+						sendto(ss, all_machines_finished, sizeof(packet), 0,
+						(struct sockaddr *)&send_addr, sizeof(send_addr));
+						break;
+					}
+
+					printf("\nLast lowered: %d\n", tkn.last_lowered);
+
 					if (local_aru < tkn.aru || machine_index == tkn.last_lowered) {
 						tkn.aru = local_aru;
 						tkn.last_lowered = machine_index;
+						printf("\nLowered aru\n");
 					}
 					local_round++;
 					last_seq = tkn.sequence;
@@ -400,6 +412,7 @@ int main(int argc, char **argv)
 				last_seen_aru = tkn.aru;
 				sendto(ss, &tkn, sizeof(token), 0, 
 					(struct sockaddr *)&neighbor, sizeof(neighbor));
+				printf("\nSent token\n");
 				has_token = 0;
 
 			/** If we receive a data packet **/		
@@ -409,8 +422,8 @@ int main(int argc, char **argv)
 
 				/** If the packet's index > local ARU, add to holding 
 				 * array **/
-				if ((buffer->packet_index > local_aru) && !(buffer->packet_index > FRAME_SIZE+local_aru)) {
-					*holding[buffer->packet_index % FRAME_SIZE] = *buffer;
+				if ((buffer->packet_index > local_aru) && !(buffer->packet_index > HOLDING_SIZE+local_aru)) {
+					*holding[buffer->packet_index % HOLDING_SIZE] = *buffer;
 					printf("\nGot packet w/ index: %d\n", buffer->packet_index);
 					if(buffer->packet_index > highest_received) {
 						highest_received = buffer->packet_index;
@@ -425,13 +438,9 @@ int main(int argc, char **argv)
 				}
 
 				/** Write all packets you can **/
-				printf("\nWriting loop begins\n");
-				for(int i = 0; i < HOLDING_SIZE; i++) {
-					printf("\n%d\n", holding[i]->packet_index);
-				}
 				printf("\nLocal ARU: %d\n", local_aru);
-				while(holding[local_aru+1 % HOLDING_SIZE]->packet_index == local_aru+1) {
-					/*write_packet(holding[local_aru % HOLDING_SIZE]);*/
+				while(holding[(local_aru+1) % HOLDING_SIZE]->packet_index == local_aru+1) {
+					write_packet(holding[local_aru % HOLDING_SIZE]);
 					printf("\nwrote: %d\n" ,holding[local_aru % HOLDING_SIZE]->packet_index);
 					local_aru++;
 				}
@@ -520,7 +529,7 @@ void fill_retrans() {
 
 void fill_frame() {
 	int temp = last_all_have + 1;
-	printf("\ntemp: %d  index: %d  all_have: %d\n", temp, frame[temp]->packet_index, all_have);
+	printf("\ntemp: %d  index: %d  all_have: %d\n", temp, frame[temp % FRAME_SIZE]->packet_index, all_have);
 	while(frame[temp % FRAME_SIZE]->packet_index <= all_have) {
 		printf("\nFilling: %d\n", temp);
 		printf("aru: %d, seq: %d", tkn.aru, tkn.sequence);
@@ -533,8 +542,8 @@ void fill_frame() {
 		}
 		if(tkn.aru == tkn.sequence) {
 			tkn.aru++;
-			tkn.sequence++;
 		}
+		tkn.sequence++;
 		sendto(ss, frame[temp % FRAME_SIZE], sizeof(packet), 0,
 			(struct sockaddr *)&send_addr, sizeof(send_addr));
 		temp++;

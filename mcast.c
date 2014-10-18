@@ -15,8 +15,8 @@
 #include <sys/time.h>
 #include <time.h>
 
-#define HOLDING_SIZE 15
-#define FRAME_SIZE 5
+#define HOLDING_SIZE 150
+#define FRAME_SIZE 50
 #define NAME_LENGTH 80
 
 #define USED_CLOCK CLOCK_MONOTONIC /* CLOCK_MONOTONIC_RAW if available*/
@@ -359,7 +359,6 @@ int main(int argc, char **argv)
 
 		temp_mask = mask;
 		/*Check if process 2 timed out, which means the token was lost*/
-#if 0
 		if(machine_index == 2) {
             if (clock_gettime(USED_CLOCK, &current)) {
                 /* getting clock time failed, what now? */
@@ -367,7 +366,7 @@ int main(int argc, char **argv)
             }
             elapsed = current.tv_sec*NANOS + current.tv_nsec - startt;
             microseconds = elapsed / 1000 + (elapsed % 1000 >= 500); /* round up halves*/
-			if(microseconds > 1000000) {
+			if(microseconds > 1000000000) {
                 if (clock_gettime(USED_CLOCK, &begin)) {
                     /* Oops, getting clock time failed */
                     exit(EXIT_FAILURE);
@@ -378,7 +377,6 @@ int main(int argc, char **argv)
 					(struct sockaddr *)&neighbor, sizeof(neighbor));
 			}
 		}
-#endif
 
 		num = select(FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask,
 			&timeout);

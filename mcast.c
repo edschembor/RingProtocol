@@ -16,7 +16,7 @@
 #include <time.h>
 
 #define HOLDING_SIZE 1500
-#define FRAME_SIZE 1500
+#define FRAME_SIZE 500
 #define NAME_LENGTH 80
 
 #define USED_CLOCK CLOCK_MONOTONIC /* CLOCK_MONOTONIC_RAW if available*/
@@ -484,7 +484,7 @@ int main(int argc, char **argv)
             }
             elapsed = current.tv_sec*NANOS + current.tv_nsec - startt;
             microseconds = elapsed / 1000 + (elapsed % 1000 >= 500); /* round up halves*/
-			if(microseconds > 1000000) {
+			if(microseconds > 500000) {
                 if (clock_gettime(USED_CLOCK, &begin)) {
                     /* Oops, getting clock time failed */
                     exit(EXIT_FAILURE);

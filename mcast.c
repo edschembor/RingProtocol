@@ -372,11 +372,10 @@ int main(int argc, char **argv)
 
 			/** We receive a token**/
 			if(packet_type == 1) {
-				printf("\nGOT TOKEN\n");
+				//printf("\nGOT TOKEN\n");
 				tkn_buf = *((token *)buffer);
-				printf("\nlocal round: %d\n", local_round);
-				printf("\ntkn_buf.round: %d\n", tkn_buf.round);
-				printf("\ntkn_buf is connected %d\n", tkn_buf.is_connected);
+				//printf("\nlocal round: %d\n", local_round);
+				//printf("\ntkn_buf.round: %d\n", tkn_buf.round);
                 if ((local_round == tkn_buf.round)&&(machine_index == 2)) {
                     tkn_buf.round++;
                 }
@@ -393,10 +392,10 @@ int main(int argc, char **argv)
 					fill_retrans();
 					fill_frame();
 
-					printf("\n----Trying to end---\n");
+					//printf("\n----Trying to end---\n");
 					printf("\n--all_have: %d\n", all_have);
-					printf("\n--tknsq: %d\n", tkn.sequence);
-					printf("\n--last seq: %d\n", last_seq);
+					//printf("\n--tknsq: %d\n", tkn.sequence);
+					//printf("\n--last seq: %d\n", last_seq);
 
 					//printf("\nLast lowered: %d\n", tkn.last_lowered);
 
@@ -439,7 +438,7 @@ int main(int argc, char **argv)
 			/** If we receive a data packet **/		
 			} else if (packet_type == 0) {
 			
-				printf("\nGot: %d\n", buffer->packet_index);
+				//printf("\nGot: %d\n", buffer->packet_index);
 
 				/** If the packet's index > local ARU, add to holding 
 				 * array **/
@@ -461,11 +460,11 @@ int main(int argc, char **argv)
 				/** Write all packets you can **/
 				while(holding[(local_aru+1) % HOLDING_SIZE]->packet_index == local_aru+1) {
 					write_packet(holding[(local_aru+1) % HOLDING_SIZE]);
-					printf("\nwrote: %d\n" ,holding[(local_aru+1) % HOLDING_SIZE]->packet_index);
+					//printf("\nwrote: %d\n" ,holding[(local_aru+1) % HOLDING_SIZE]->packet_index);
 					local_aru++;
 				}
-				printf("\nLocal ARU: %d\n", local_aru);
-				printf("\nEscaped\n");
+				//printf("\nLocal ARU: %d\n", local_aru);
+				//printf("\nEscaped\n");
 
 			/** If we receive a termination packet **/
 			} else if (packet_type == 3) {
@@ -548,19 +547,19 @@ void retransmit() {
 				sendto(ss, &temp_packet, sizeof(packet), 0, 
 					(struct sockaddr *)&send_addr, sizeof(send_addr));
 				tkn.retrans_req[i] = -1;
-                printf("\nretrans'd index: %d\n", temp_packet.packet_index);
+                //printf("\nretrans'd index: %d\n", temp_packet.packet_index);
 			}
         }
          
         /** Retransmit packets from the frame **/
         if(tkn.retrans_req[i] != -1) {   
             temp_packet = *frame[tkn.retrans_req[i] % FRAME_SIZE];
-            printf("\ntemp index %d\n", temp_packet.packet_index);
+            //printf("\ntemp index %d\n", temp_packet.packet_index);
             if (tkn.retrans_req[i] == temp_packet.packet_index) {
                 sendto(ss, &temp_packet, sizeof(packet), 0, 
 					(struct sockaddr *)&send_addr, sizeof(send_addr));
 				tkn.retrans_req[i] = -1;
-                printf("\nretrans'd index: %d\n", temp_packet.packet_index);
+                //printf("\nretrans'd index: %d\n", temp_packet.packet_index);
 
             }
         }
@@ -582,11 +581,11 @@ void fill_retrans() {
 		}
 	}
 
-    printf("\n-----------------------------\nRETRANS\n[ ");
+    /*printf("\n-----------------------------\nRETRANS\n[ ");
     for (i = 0; i < RETRANS_SIZE; i++) {
         printf("%d, ", tkn.retrans_req[i]);
     }
-    printf(" ]\n");
+    printf(" ]\n");*/
 }
 
 /*void fill_frame() {

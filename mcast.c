@@ -110,7 +110,6 @@ int main(int argc, char **argv)
 	char filename[NAME_LENGTH];
 	sprintf(filename, "%d", machine_index);
 	strcat(filename, ".out");
-	printf("%s", filename);
 	if ((file = fopen(filename, "w")) == NULL) {
 		perror("fopen");
 		exit(0);
@@ -249,11 +248,11 @@ int main(int argc, char **argv)
 	i_packet->addr = my_addr;
     i_packet->type = 2;
 
-/********************************
- * ******************************
- * IDENTIFY NEIGHBORS
- * ******************************
- * ******************************/
+	/********************************
+ 	* ******************************
+ 	* IDENTIFY NEIGHBORS
+ 	* ******************************
+ 	* ******************************/
 
     for(;;)
     {
@@ -292,7 +291,6 @@ int main(int argc, char **argv)
 
             /** If token Packet **/
             if (packet_type == 1) {
-				printf("\nI got the token!\n");
 			    tkn = *((token *)buffer);
 				has_token = 1;
 				seen_token = 1;
@@ -450,18 +448,16 @@ int main(int argc, char **argv)
             }
             elapsed = current.tv_sec*NANOS + current.tv_nsec - startt;
             microseconds = elapsed / 1000 + (elapsed % 1000 >= 500);
-			if(microseconds > 1000000) {
+			if(microseconds > 250000) {
                 if (clock_gettime(USED_CLOCK, &begin)) {
                     /* Getting clock time failed */
                     exit(EXIT_FAILURE);
                 }
                 startt = begin.tv_sec*NANOS + begin.tv_nsec;
-				printf("\nPROCESS 2 TIMED OUT*************\n");
 				sendto(ss, &tkn, sizeof(token), 0, 
 					(struct sockaddr *)&neighbor, sizeof(neighbor));
 			}
 		}
-
     }
 
 	/** Free all malloc'd memory **/

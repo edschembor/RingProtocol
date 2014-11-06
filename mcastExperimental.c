@@ -1,7 +1,7 @@
 /* John An and Edward Schembor
  * Distributed Systems
  * Exercise 2
- * mcast program
+ * mcast revised program
  */
 
 #include <arpa/inet.h>
@@ -15,8 +15,9 @@
 #include <sys/time.h>
 #include <time.h>
 
-#define HOLDING_SIZE 1500
-#define FRAME_SIZE 150
+#define BUFFER_SIZE 5000
+#define WINDOW_SIZE 2500
+#define BURST_SIZE  150
 #define NAME_LENGTH 80
 
 #define USED_CLOCK CLOCK_MONOTONIC /* CLOCK_MONOTONIC_RAW if available*/
@@ -24,11 +25,12 @@
 
 void recv_dbg_init(int percent, int machine_index);
 void final_report();
-void write_packet(packet *p);
+void write_packets();
 int minimum(int a, int b);
 void retransmit();
 void fill_retrans();
-void fill_frame();
+void fill_window();
+//void set_local_aru();
 
 struct sockaddr_in name;
 struct sockaddr_in send_addr;
@@ -76,17 +78,17 @@ ip_packet          *i_packet;
 packet             *buffer;
 packet             *machine_finished; /*Tells other machines this is done*/
 packet             *all_machines_finished; /*Tells others all are done*/
+int                num_finished = 0;
 
 int                local_aru = -1;
 int                sent_packets = 0; /*Number of unique packets machine sent*/
-int                last_seen_aru = 0;
-packet             *holding[HOLDING_SIZE]; /*Array for receiving*/
-packet             *frame[FRAME_SIZE]; /*Array for sending*/
+int                last_seen_aru = -1;
+packet             *recv_buf[BUFFER_SIZE]; /*Array for receiving*/
 FILE               *file;
-int                highest_received = 0; /*Highest packet index received*/
-int                all_have = -1; /*Index which all machines have received*/
+int                global_aru = -1; /*Index which all machines have received*/
 int                local_round = 0; /* local round */
-int                last_seq = 0;
+int                last_seq = -1;
+int                beginning = 0; /*start of window*/
 
 int main(int argc, char **argv)
 {
@@ -106,6 +108,10 @@ int main(int argc, char **argv)
 	num_machines = atoi(argv[3]);
 	loss_rate = atoi(argv[4]);
 
+    char machines_finished[num_machines];
+    for (int i = 0; i < num_machines; i++) {
+        machines_finished[i] = 0;
+    }
 	/*Open file for writing*/
 	char filename[NAME_LENGTH];
 	sprintf(filename, "%d", machine_index);
@@ -122,18 +128,15 @@ int main(int argc, char **argv)
 	srand(time(NULL));
 
     /*Malloc all needed memory*/
-	received_packet = malloc(sizeof(packet));
+	received_packet = malloc(PACKET_SIZE);
 	i_packet = malloc(sizeof(ip_packet));
     buffer = malloc(PACKET_SIZE);
-	for(i = 0; i < FRAME_SIZE; i++) {
-		frame[i] = malloc(sizeof(packet));
-        frame[i]->packet_index = -1;
-	}
-	for(i = 0; i < HOLDING_SIZE; i++) {
-		holding[i] = malloc(sizeof(packet));
-		holding[i]->packet_index = -1;
+	for(i = 0; i < BUFFER_SIZE; i++) {
+		recv_buf[i] = malloc(sizeof(packet));
+		recv_buf[i]->packet_index = -1;
 	}
 	all_machines_finished = malloc(sizeof(packet));
+    machine_finished = malloc(sizeof(packet));
 
 	/*Creates the mcast address*/
     mcast_addr = 225 << 24 | 1 << 16 | 2 << 8 | 103; /* (225.1.2.103) */
@@ -229,7 +232,7 @@ int main(int argc, char **argv)
 	/*The first process creates the initial token*/
     if(machine_index == 1) {
         for(i = 0; i < RETRANS_SIZE; i++) {
-            tkn.retrans_req[i] = -1;
+            tkn.retrans[i] = -1;
 		}
         tkn.type = 1;
 		tkn.sequence = -1;
@@ -350,8 +353,7 @@ int main(int argc, char **argv)
 			packet_type = buffer->type;
 
 			/** We receive a token**/
-			if(packet_type == 1) {
-				
+			if(packet_type == 1) { 
 				/* Cast the received token to a buffer */
 				tkn_buf = *((token *)buffer);
                 
@@ -377,8 +379,9 @@ int main(int argc, char **argv)
 					 * frame and send*/
 					tkn = tkn_buf;
 					retransmit();
+                    write_packets();
+					fill_window();
 					fill_retrans();
-					fill_frame();
 
 					/* Token aru logic */
 					if (local_aru < tkn.aru || machine_index == tkn.last_lowered) {
@@ -387,59 +390,66 @@ int main(int argc, char **argv)
 					}
 
 					/* Termination logic */
-					if((all_have == tkn.sequence) && (tkn.sequence == last_seq) && (sent_packets == num_packets)) {
-						all_machines_finished->type = 3;
-						sendto(ss, all_machines_finished, sizeof(packet), 0,
-						(struct sockaddr *)&send_addr, sizeof(send_addr));
-						break;
+					if((global_aru == tkn.sequence) && (tkn.sequence == last_seq)) {
+                        machine_finished->type = 3;
+                        machine_finished->machine_index = machine_index;
+                        sendto(ss, machine_finished, sizeof(packet), 0,
+                            (struct sockaddr *)&send_addr, sizeof(send_addr));
+                        if (machines_finished[machine_index-1] == 0) {
+                            machines_finished[machine_index-1] = 1;
+                            num_finished++;
+                        }
 					}
 
 					/** Calculate values **/
-					all_have = minimum(tkn.aru, last_seen_aru);\
+					global_aru = minimum(tkn.aru, last_seen_aru);
 					last_seen_aru = tkn.aru;
 					local_round++;
 					last_seq = tkn.sequence;
 				}
 				
 				/* Pass along the token */
-				sendto(ss, &tkn, sizeof(token), 0, 
-					(struct sockaddr *)&neighbor, sizeof(neighbor));	
+                if (!(!tkn_buf.is_connected && machine_index == 1)) {
+				    sendto(ss, &tkn, sizeof(token), 0, 
+					    (struct sockaddr *)&neighbor, sizeof(neighbor));
+                }
 
 			/** If we receive a data packet **/		
 			} else if (packet_type == 0) {
 			
 				/** If the packet's index > local ARU and not so high that 
-				 * it will overwrite a neccessary packet, add it to holding 
+				 * it will overwrite a neccessary packet, add it to recv_buf 
 				 * array **/
-				if ((buffer->packet_index > local_aru) && (buffer->packet_index <= HOLDING_SIZE+local_aru)) {
-					*holding[buffer->packet_index % HOLDING_SIZE] = *buffer;
-					if(buffer->packet_index > highest_received) {
-						highest_received = buffer->packet_index;
-					}
-				}
-
-				/** First packet in holding array edge case, write 
-				 * and update **/
-				if (local_aru == -1 && holding[0]->packet_index != -1) {
-					local_aru++;
-					write_packet(holding[0]);	
-				}
-
-				/** Write all packets you can **/
-				while(holding[(local_aru+1) % HOLDING_SIZE]->packet_index == local_aru+1) {
-					write_packet(holding[(local_aru+1) % HOLDING_SIZE]);
-					local_aru++;
-				}
-
+                if (buffer->machine_index > 0) {
+                    if (buffer->packet_index > local_aru) {
+                        *recv_buf[buffer->packet_index % BUFFER_SIZE] = *buffer;
+                    }
+                    if (local_aru == -1 && recv_buf[0]->packet_index != -1) {
+                        local_aru++;
+                    }
+                    while(recv_buf[(local_aru+1)%BUFFER_SIZE]->packet_index > -1) {
+                        local_aru++;
+                    }
+                }
 			/** If we receive a termination packet **/
 			} else if (packet_type == 3) {
-				all_machines_finished->type = 3;
-				sendto(ss, all_machines_finished, sizeof(packet), 0,
-					(struct sockaddr *)&send_addr, sizeof(send_addr));
-				break;
-			}
+                if (machines_finished[buffer->machine_index] == 0) {
+                    machines_finished[buffer->machine_index] = 1;
+                    num_finished++;
+                }
+                if (num_finished == num_machines) {
+                    all_machines_finished->type = 4;
+                    sendto(ss, all_machines_finished, sizeof(packet), 0,
+                        (struct sockaddr *)&send_addr, sizeof(send_addr));
+                    break;
+                }
+			} else if (packet_type == 4) {
+                all_machines_finished->type = 4;
+                sendto(ss, all_machines_finished, sizeof(packet), 0,
+                    (struct sockaddr *)&send_addr, sizeof(send_addr));
+                break;
+            }
 		}
-
 		/*Check if machine 2 has timed out, which means the token was lost*/
 		if(machine_index == 2) {
             if (clock_gettime(USED_CLOCK, &current)) {
@@ -448,7 +458,7 @@ int main(int argc, char **argv)
             }
             elapsed = current.tv_sec*NANOS + current.tv_nsec - startt;
             microseconds = elapsed / 1000 + (elapsed % 1000 >= 500);
-			if(microseconds > 250000) {
+			if(microseconds > 100000) {
                 if (clock_gettime(USED_CLOCK, &begin)) {
                     /* Getting clock time failed */
                     exit(EXIT_FAILURE);
@@ -466,11 +476,8 @@ int main(int argc, char **argv)
 	free(buffer);
 	free(machine_finished);
 	free(all_machines_finished);
-	for(i = 0; i < FRAME_SIZE; i++) {
-		free(frame[i]);
-	}
-	for(i = 0; i < HOLDING_SIZE; i++) {
-		free(holding[i]);
+	for(i = 0; i < BUFFER_SIZE; i++) {
+		free(recv_buf[i]);
 	}
 
 	/* Close the file, print the final report, and terminate */
@@ -489,10 +496,17 @@ void final_report() {
 		- (start.tv_sec * 1000000 + start.tv_usec)));
 }
 
-void write_packet(packet *p) {
-	/* Write a packet to the file */
-	fprintf(file, "%2d, %8d , %8d\n", p->machine_index, p->packet_index, 
-		p->random_number);
+void write_packets() {
+    int clear = -1;
+    for (int i = 0; i < WINDOW_SIZE; i++) {
+        if((recv_buf[beginning]->packet_index > global_aru) || (recv_buf[beginning]->packet_index == -1)) {
+            break;
+        }
+        fprintf(file, "%2d, %8d , %8d\n", recv_buf[beginning]->machine_index, recv_buf[beginning]->packet_index, 
+            recv_buf[beginning]->random_number);
+        recv_buf[beginning]->packet_index = clear;
+        beginning = (beginning + 1) % BUFFER_SIZE;
+    }
 }
 
 int minimum(int a, int b) {
@@ -505,83 +519,72 @@ int minimum(int a, int b) {
 }
 
 void retransmit() {
-	/* Retransmit any values you have which are in the rtr array */
-	packet temp_packet;
-	for(int i = 0; i < RETRANS_SIZE; i++) {
-
-        /** Retransmit packets from the holding array**/
-        if(tkn.retrans_req[i] != -1) {	
-            temp_packet = *holding[tkn.retrans_req[i] % HOLDING_SIZE];
-			if (tkn.retrans_req[i] == temp_packet.packet_index){
-				sendto(ss, &temp_packet, sizeof(packet), 0, 
-					(struct sockaddr *)&send_addr, sizeof(send_addr));
-				tkn.retrans_req[i] = -1;
-			}
-        }
-         
-        /** Retransmit packets from the frame **/
-        if(tkn.retrans_req[i] != -1) {   
-            temp_packet = *frame[tkn.retrans_req[i] % FRAME_SIZE];
-            if (tkn.retrans_req[i] == temp_packet.packet_index) {
-                sendto(ss, &temp_packet, sizeof(packet), 0, 
-					(struct sockaddr *)&send_addr, sizeof(send_addr));
-				tkn.retrans_req[i] = -1;
+    packet temp_packet;
+    for (int i = 0; i < RETRANS_SIZE; i++) {
+        if (tkn.retrans[i] > 0) {
+            temp_packet = *recv_buf[tkn.retrans[i] % BUFFER_SIZE];
+            if (tkn.retrans[i] == temp_packet.packet_index) {
+                sendto(ss, &temp_packet, sizeof(packet), 0,
+                    (struct sockaddr *)&send_addr, sizeof(send_addr));
+                tkn.retrans[i] = -1;
             }
         }
-	}
+    }
 }
 
 void fill_retrans() {
-	/* Fill the rtr with any packets which the process is missing */
-	int temp = local_aru+1;
-    int index;
-    char rtr_full = 1;
+
     char not_been_set = 1;
+    int temp_local_aru = local_aru+1;
+    int index;
 
-	/* Parse through the holding array and look for missing packets */
-    for (int i = temp; i <= tkn.sequence; i++) {
-        index = holding[i % HOLDING_SIZE]->packet_index;
+    /*iterate to end of window*/
+    while(temp_local_aru <= tkn.sequence) {
+        index = recv_buf[temp_local_aru % BUFFER_SIZE]->packet_index;
         for (int j = 0; j < RETRANS_SIZE; j++) {
-
-			/*This logic prevents adding duplicates to the rtr*/
-            if (tkn.retrans_req[j] == -1 && not_been_set) {
-                tkn.retrans_req[j] = i;
-                rtr_full = 0;
+            if (index < local_aru && tkn.retrans[j] == -1 && not_been_set) {
+                tkn.retrans[j] = temp_local_aru;
                 not_been_set = 0;
-            } else if (tkn.retrans_req[j] == index) {
-                tkn.retrans_req[j] = -1;
+            } else if (tkn.retrans[j] == temp_local_aru) {
+                tkn.retrans[j] = -1;
             }
-
         }
-		
-		/* Stop looping if the rtr is already full */
-        if (rtr_full)
-            return;
-        rtr_full = 1;
+        temp_local_aru++;
     }
-
 }
 
-void fill_frame() {
-	/* Fill the frame with new packets and send them */
-	int temp = ((tkn.sequence+1) % FRAME_SIZE);
+void fill_window() {
+	int temp = ((tkn.sequence+1) % BUFFER_SIZE);
 
-	while((frame[temp]->packet_index <= all_have) && (sent_packets < num_packets)) {
-		
-		/*Fill this spot with a new packet*/
-		frame[temp]->random_number = rand();
-		frame[temp]->type = 0;
-		frame[temp]->machine_index = machine_index;
-		if(tkn.aru == tkn.sequence) {
-			tkn.aru++;
-		}
-		tkn.sequence++;
-		frame[temp]->packet_index = tkn.sequence;
-		sendto(ss, frame[temp], sizeof(packet), 0,
-			(struct sockaddr *)&send_addr, sizeof(send_addr));
-		
-		/*Increment temp and sent packets*/
-		temp = (temp+1) % FRAME_SIZE;
-		sent_packets++;
-	}
+    for (int i = 0; i < BURST_SIZE; i++) {
+
+        if (tkn.sequence+1 >= ((recv_buf[beginning]->packet_index)+WINDOW_SIZE)) {
+            return;
+        }
+
+        if(sent_packets == num_packets) {
+            return;
+        }
+
+        if (recv_buf[temp]->packet_index > -1) {
+            return;
+        }
+        recv_buf[temp]->random_number = rand();
+        recv_buf[temp]->type = 0;
+        recv_buf[temp]->machine_index = machine_index;
+        if(tkn.aru == tkn.sequence) {
+            tkn.aru++;
+        }
+        if (tkn.sequence == local_aru) {
+            local_aru++;
+        }
+        tkn.sequence++;
+        recv_buf[temp]->packet_index = tkn.sequence;
+        sendto(ss, recv_buf[temp], sizeof(packet), 0,
+            (struct sockaddr *)&send_addr, sizeof(send_addr));
+
+        sent_packets++;
+        temp = ((tkn.sequence+1) % BUFFER_SIZE);
+
+    }
 }
